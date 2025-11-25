@@ -1,0 +1,38 @@
+PROJECT_NAME           = "Visage"
+OUTPUT_DIRECTORY       = _build/doxygen
+OUTPUT_LANGUAGE        = English
+
+INPUT                  = ../visage_app ../visage_graphics ../visage_ui ../visage_widgets ../visage_windowing ../visage_utils ../visage_file_embed ../README.md
+FILE_PATTERNS          = *.h *.hpp
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */third_party/* */bin/* */tests/* */CMakeFiles/* */build/*
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_PACKAGE        = NO
+EXTRACT_LOCAL_CLASSES  = YES
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+JAVADOC_AUTOBRIEF      = YES
+MULTILINE_CPP_IS_BRIEF = YES
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+
+QUIET                  = NO
+WARN_IF_UNDOCUMENTED   = NO
+WARNINGS               = YES
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_RTF           = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+
+ALPHABETICAL_INDEX     = NO
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = ..

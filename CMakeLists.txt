@@ -32,10 +32,12 @@ set(VISAGE_APPLICATION_NAME ${CMAKE_PROJECT_NAME} CACHE STRING "Application name
 if (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   option(VISAGE_BUILD_EXAMPLES "Build examples" ON)
   option(VISAGE_BUILD_TESTS "Build tests" ON)
+  option(VISAGE_BUILD_DOCS "Build documentation" OFF)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 else ()
   option(VISAGE_BUILD_EXAMPLES "Build examples" OFF)
   option(VISAGE_BUILD_TESTS "Build tests" OFF)
+  option(VISAGE_BUILD_DOCS "Build documentation" OFF)
 endif ()
 
 set(VISAGE_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
@@ -113,4 +115,38 @@ set_target_properties(visage PROPERTIES FOLDER "visage")
 
 if (VISAGE_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif ()
+
+if (VISAGE_BUILD_DOCS)
+  find_package(Doxygen QUIET)
+  find_program(SPHINX_EXECUTABLE NAMES sphinx-build)
+
+  if (DOXYGEN_FOUND AND SPHINX_EXECUTABLE)
+    set(DOCS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/docs)
+    set(DOXYGEN_XML ${DOCS_DIR}/_build/doxygen/xml/index.xml)
+    set(SPHINX_HTML ${DOCS_DIR}/_build/html/index.html)
+
+    add_custom_command(
+      OUTPUT ${DOXYGEN_XML}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${DOCS_DIR}/_build/doxygen
+      COMMAND ${DOXYGEN_EXECUTABLE} ${DOCS_DIR}/Doxyfile
+      WORKING_DIRECTORY ${DOCS_DIR}
+      COMMENT "Generating Doxygen XML"
+      VERBATIM
+    )
+
+    add_custom_command(
+      OUTPUT ${SPHINX_HTML}
+      DEPENDS ${DOXYGEN_XML}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${DOCS_DIR}/_build/html
+      COMMAND ${SPHINX_EXECUTABLE} -b html ${DOCS_DIR} ${DOCS_DIR}/_build/html
+      WORKING_DIRECTORY ${DOCS_DIR}
+      COMMENT "Building Sphinx documentation"
+      VERBATIM
+    )
+
+    add_custom_target(docs DEPENDS ${SPHINX_HTML})
+  else ()
+    message(WARNING "Documentation disabled: missing Doxygen (${DOXYGEN_EXECUTABLE}) or sphinx-build (${SPHINX_EXECUTABLE}).")
+  endif ()
 endif ()
