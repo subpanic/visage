@@ -10,6 +10,8 @@ Visage includes runnable demos under `examples/`. Key entries:
 - **BringYourOwnWindow**: render into a window you create.
 - **Emscripten template**: web build scaffold.
 
+Headers to include: each example includes the specific module it needs—common ones are `<visage_app/application_window.h>`, `<visage_graphics/canvas.h>`, plus generated resource headers (`<visage_graphics/fonts.h>`, `<visage_graphics/shaders.h>`).
+
 ## Documentation gallery plan
 
 - Capture screenshots via `ApplicationEditor::takeScreenshot` or OS capture; store in `docs/_static/examples/`.

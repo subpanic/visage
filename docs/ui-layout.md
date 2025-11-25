@@ -2,6 +2,8 @@
 
 ## Frame tree
 
+Headers to include: `#include <visage_ui/frame.h>`, `#include <visage_ui/events.h>` for event structs, and palette/theme headers (`<visage_graphics/palette.h>`, `<visage_graphics/theme.h>`) when styling.
+
 - `Frame` (`visage_ui/frame.h`) is the base UI node: bounds, visibility, drawing, input, focus, DPI, and hierarchy.
 - Lifecycle hooks: `init`, `draw`, `destroy`, `resized`, `dpiChanged`, `visibilityChanged`, `hierarchyChanged`, `focusChanged`.
 - Event callbacks: mouse enter/exit/down/up/move/drag, wheel, key press/release, text input, drag-and-drop, hit testing.
@@ -9,6 +11,8 @@
 - Focus and keyboard: `requestKeyboardFocus`, text input gating, tab focus helpers.
 
 ### Minimal custom frame
+
+Headers to include: `#include <visage_ui/frame.h>`, `#include <visage_graphics/font.h>`, `#include <visage_graphics/fonts.h>` (generated).
 
 ```cpp
 class Card : public visage::Frame {
@@ -42,6 +46,8 @@ public:
 
 ### Flex example
 
+Headers to include: `#include <visage_ui/layout.h>`, `#include <visage_utils/dimension.h>`
+
 ```cpp
 root.layout().setFlex(true);
 root.layout().setFlexGap(visage::Dimension::pixels(8));
@@ -53,6 +59,38 @@ for (auto* child : root.children()) {
 }
 
 root.computeLayout();
+```
+
+### Flex options (key setters on `Layout`)
+
+- `setFlex(true)`: enables flex layout. Direction defaults to rows; `setFlexRows(false)` switches to columns.
+- `setFlexGrow(float)`: how much free space a child consumes relative to siblings.
+- `setFlexShrink(float)`: how much a child shrinks when space is tight.
+- `setFlexGap(Dimension)`: gap between items.
+- `setFlexWrap(bool)` / `setFlexWrapReverse(bool)`: allow wrapping to new rows/columns.
+- `setFlexReverseDirection(bool)`: reverse item order.
+- `setFlexItemAlignment(ItemAlignment)`: cross-axis alignment for children (Stretch/Start/Center/End).
+- `setFlexSelfAlignment(ItemAlignment)`: per-child override of cross-axis alignment.
+- `setFlexWrapAlignment(WrapAlignment)`: how wrapped lines are spaced (Start/Center/End/Stretch/SpaceBetween/SpaceAround/SpaceEvenly).
+- `setPadding*` / `setMargin*`: inset or space around children.
+- `setDimensions(width, height)`: force a fixed size for a child instead of flex sizing.
+
+### Wrapped grid example
+
+```cpp
+auto& layout = grid.layout();
+layout.setFlex(true);
+layout.setFlexWrap(true);
+layout.setFlexGap(visage::Dimension::pixels(10));
+layout.setFlexWrapAlignment(visage::Layout::WrapAlignment::SpaceEvenly);
+
+for (auto* tile : grid.children()) {
+  tile->layout().setWidth(visage::Dimension::percent(30)); // approx 3 per row
+  tile->layout().setHeight(visage::Dimension::pixels(120));
+  tile->layout().setFlexGrow(1.0f); // allow stretching with available space
+}
+
+grid.computeLayout();
 ```
 
 ## Input model

@@ -2,6 +2,8 @@
 
 ## Build-time embedding
 
+Headers to include: generated headers from `add_embedded_resources` (e.g., `"my_assets.h"`), and for built-ins: `<visage_graphics/shaders.h>`, `<visage_graphics/fonts.h>`, `<visage_graphics/icons.h>`.
+
 - `visage_file_embed` provides CMake helpers to bake assets (shaders, images, etc.) into the binary.
 - Use `add_embedded_resources(project, include_filename, namespace, files)` from `visage_file_embed/CMakeLists.txt`.
 - Generated sources end up in a `_generated` folder per target; an include header exposes `EmbeddedFile` lookups.

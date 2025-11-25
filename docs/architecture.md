@@ -10,6 +10,15 @@
 
 ## Subsystems
 
+Headers to include (per subsystem):
+- UI & Layout: `<visage_ui/frame.h>`, `<visage_ui/layout.h>`, `<visage_ui/events.h>`
+- Graphics: `<visage_graphics/canvas.h>`, `<visage_graphics/post_effects.h>`, `<visage_graphics/font.h>`, `<visage_graphics/palette.h>`, `<visage_graphics/theme.h>`
+- Windowing: `<visage_windowing/windowing.h>`
+- Widgets: specific widget header from `<visage_widgets/>`
+- Utilities: `<visage_utils/space.h>`, `<visage_utils/dimension.h>`, `<visage_utils/events.h>`
+- Embedding: generated headers from `visage_file_embed`
+
+Subsystem summary:
 - **UI & Layout**: Flex-like layout (`visage_ui/layout.h`), focus/keyboard model, hit testing, timers (`visage_ui/events.h`), undo stack.
 - **Graphics**: Immediate-mode `Canvas` (`visage_graphics/canvas.h`) with shapes, gradients, text, SVG, post-effects, caching, dirty region redraw. Theming via `theme.h` + `palette.h`.
 - **Windowing**: Abstract `Window` interface with native/client/popup decoration; plugin windows for embedding into hosts.

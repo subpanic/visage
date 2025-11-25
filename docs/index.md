@@ -15,6 +15,7 @@ theming
 widgets
 assets-embedding
 shaders
+animation
 examples
 faq-troubleshooting
 ```

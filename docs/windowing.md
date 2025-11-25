@@ -2,6 +2,8 @@
 
 ## Window interface
 
+Headers to include: `#include <visage_windowing/windowing.h>`
+
 - `visage_windowing/windowing.h` exposes the cross-platform `Window` abstraction with draw callbacks and normalized events.
 - Decorations: native, client (custom chrome), popup.
 - Plugin windows: create windows that embed into a host with `createPluginWindow`.
@@ -13,6 +15,8 @@
 - `Window::setWindowTitle`, `setAlwaysOnTop`, `setFixedAspectRatio`, `show/showMaximized/hide/close`.
 
 ### Example: plugin window
+
+Headers to include: `#include <visage_windowing/windowing.h>` and your renderer include if you initialize manually.
 
 ```cpp
 void* host_handle = /* HWND/NSView/etc from host */;

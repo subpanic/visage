@@ -20,6 +20,8 @@ Examples and tests are enabled by default when building this repository directly
 
 ## Minimal application
 
+Headers to include: `#include <visage_app/application_window.h>`
+
 ```cpp
 #include <visage_app/application_window.h>
 
@@ -38,6 +40,8 @@ int main() {
 ```
 
 ### Using dimensions and DPI
+
+Headers to include: `#include <visage_utils/dimension.h>`
 
 ```cpp
 app.setWindowDimensions(
