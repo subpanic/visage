@@ -37,6 +37,17 @@ int main() {
 }
 ```
 
+### Using dimensions and DPI
+
+```cpp
+app.setWindowDimensions(
+  visage::Dimension::percent(10),  // x: 10% of display width
+  visage::Dimension::percent(10),  // y: 10% of display height
+  visage::Dimension::pixels(800),  // width: 800 logical px
+  visage::Dimension::pixels(600)   // height: 600 logical px
+);
+```
+
 ## Build and run an example
 
 ```

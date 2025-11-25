@@ -14,6 +14,7 @@ windowing
 theming
 widgets
 assets-embedding
+shaders
 examples
 faq-troubleshooting
 ```

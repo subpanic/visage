@@ -34,6 +34,7 @@
 #include <vector>
 
 namespace visage {
+  /// Cross-platform native window abstraction used by Visage to normalize events and drawing.
   class Window {
   public:
     static constexpr float kDefaultDpi = 96.0f;
@@ -47,6 +48,7 @@ namespace visage {
     static void setDoubleClickSpeed(int ms) { double_click_speed_ = ms; }
     static int doubleClickSpeed() { return double_click_speed_; }
 
+    /// Interface for receiving normalized input and window events from the platform backend.
     class EventHandler {
     public:
       virtual ~EventHandler() = default;
@@ -87,32 +89,54 @@ namespace visage {
 
     Window(const Window&) = delete;
 
+    /// Constructs a hidden window. Use show/showMaximized to present.
     Window();
+    /// Constructs a window with an initial client size.
     Window(int width, int height);
     virtual ~Window() = default;
 
+    /// Called when the window becomes visible.
     auto& onShow() { return on_show_; }
+    /// Called when the window is hidden or closed.
     auto& onHide() { return on_hide_; }
+    /// Called when the drawable client area is resized.
     auto& onWindowContentsResized() { return on_contents_resized_; }
 
+    /// Process OS events until termination.
     virtual void runEventLoop() = 0;
+    /// Platform-specific native handle (HWND/NSWindow/etc).
     virtual void* nativeHandle() const = 0;
+    /// Notify backend that the client area resized.
     virtual void windowContentsResized(int width, int height) = 0;
+    /// Called when the user requests close; return false to veto.
     virtual bool closeRequested() { return true; }
 
+    /// Returns platform-specific handle used to initialize rendering.
     virtual void* initWindow() const { return nullptr; }
+    /// Returns a global display/connection object if required by the backend.
     virtual void* globalDisplay() const { return nullptr; }
+    /// Handle plugin file descriptor events (POSIX backends).
     virtual void processPluginFdEvents() { }
+    /// POSIX file descriptor for event polling (Linux).
     virtual int posixFd() const { return 0; }
 
+    /// Present the window.
     virtual void show() = 0;
+    /// Present maximized.
     virtual void showMaximized() = 0;
+    /// Hide without destroying.
     virtual void hide() = 0;
+    /// Close and destroy.
     virtual void close() = 0;
+    /// True if visible.
     virtual bool isShowing() const = 0;
+    /// Set native window title.
     virtual void setWindowTitle(const std::string& title) = 0;
+    /// Lock aspect ratio to current size.
     virtual void setFixedAspectRatio(bool fixed) { }
+    /// Maximum supported client dimensions.
     virtual IPoint maxWindowDimensions() const = 0;
+    /// Request always-on-top where supported.
     virtual void setAlwaysOnTop(bool on_top) { }
 
     void notifyShow() const { on_show_.callback(); }
@@ -211,26 +235,36 @@ namespace visage {
     VISAGE_LEAK_CHECKER(Window)
   };
 
+  /// Cursor utilities.
   void setCursorStyle(MouseCursor style);
   void setCursorVisible(bool visible);
   Point cursorPosition();
   void setCursorPosition(Point window_position);
   void setCursorScreenPosition(Point screen_position);
+
+  /// Platform feature helpers.
   bool isMobileDevice();
   void showMessageBox(std::string title, std::string message);
+
+  /// Clipboard helpers.
   std::string readClipboardText();
   void setClipboardText(const std::string& text);
 
   int doubleClickSpeed();
   void setDoubleClickSpeed(int ms);
 
+  /// Platform default DPI scale.
   float defaultDpiScale();
+
+  /// Compute native bounds from logical dimensions and DPI.
   IBounds computeWindowBounds(const Dimension& x, const Dimension& y, const Dimension& width,
                               const Dimension& height);
 
+  /// Create a window with logical position/size and a decoration style.
   std::unique_ptr<Window> createWindow(const Dimension& x, const Dimension& y,
                                        const Dimension& width, const Dimension& height,
                                        Window::Decoration decoration_style = Window::Decoration::Native);
+  /// Create a window embedded into a host parent window.
   std::unique_ptr<Window> createPluginWindow(const Dimension& width, const Dimension& height,
                                              void* parent_handle);
 

@@ -30,12 +30,15 @@ namespace visage {
   class WindowEventHandler;
   class ClientWindowDecoration;
 
+  /// Root frame that wraps the application's content and optional client decoration.
   class TopLevelFrame : public Frame {
   public:
     explicit TopLevelFrame(ApplicationEditor* editor);
     ~TopLevelFrame() override;
 
+    /// Updates DPI and bounds when resized; adjusts client decoration if present.
     void resized() override;
+    /// Adds client-side title bar/buttons when using client decoration.
     void addClientDecoration();
     bool hasClientDecoration() const { return client_decoration_ != nullptr; }
 
@@ -44,6 +47,10 @@ namespace visage {
     std::unique_ptr<ClientWindowDecoration> client_decoration_;
   };
 
+  /// Base class that manages a Canvas, window attachment, and event bridge.
+  ///
+  /// ApplicationWindow inherits this to provide a windowed experience; the same
+  /// class can render windowless surfaces (e.g., for headless rendering or plugins).
   class ApplicationEditor : public Frame {
   public:
     static constexpr int kDefaultClientTitleBarHeight = 30;
@@ -51,16 +58,23 @@ namespace visage {
     ApplicationEditor();
     ~ApplicationEditor() override;
 
+    /// Captures the current frame buffer contents.
     const Screenshot& takeScreenshot();
 
+    /// Applies native size and DPI to the Canvas after window changes.
     void setCanvasDetails();
 
+    /// Attach the editor to a Window, set callbacks, and prepare the Canvas.
     void addToWindow(Window* window);
+    /// Render into an offscreen surface of the given size.
     void setWindowless(int width, int height);
+    /// Detach from the Window and release swap chain.
     void removeFromWindow();
+    /// Draws all dirty frames and submits the Canvas.
     void drawWindow();
 
     bool isFixedAspectRatio() const { return fixed_aspect_ratio_ != 0.0f; }
+    /// Enable or disable fixed aspect ratio based on current bounds.
     void setFixedAspectRatio(bool fixed);
     float aspectRatio() const override {
       if (height() && width())
@@ -82,6 +96,7 @@ namespace visage {
         fixed_aspect_ratio_ = aspectRatio();
     }
 
+    /// Enforces minimum size and aspect constraints on native resize.
     void adjustWindowDimensions(int* width, int* height, bool horizontal_resize, bool vertical_resize) const;
 
     void adjustWindowDimensions(uint32_t* width, uint32_t* height, bool horizontal_resize,
@@ -93,6 +108,7 @@ namespace visage {
       *height = h;
     }
 
+    /// Adds client decoration UI if supported on the current platform.
     void addClientDecoration() { top_level_->addClientDecoration(); }
     HitTestResult hitTest(const Point& position) const override {
       if (position.y < kDefaultClientTitleBarHeight && top_level_->hasClientDecoration())

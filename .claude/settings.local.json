@@ -11,7 +11,8 @@
       "Bash(pgrep:*)",
       "Bash(find:*)",
       "Bash(./cmake_build/visage_graphics/Debug/VisageGraphicsTests:*)",
-      "Bash(/Users/mtytel/visage/cmake_build/visage_graphics/Debug/VisageGraphicsTests:*)"
+      "Bash(/Users/mtytel/visage/cmake_build/visage_graphics/Debug/VisageGraphicsTests:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }

@@ -12,6 +12,19 @@
 - `computeWindowBounds` to translate logical dimensions to native pixel rectangles.
 - `Window::setWindowTitle`, `setAlwaysOnTop`, `setFixedAspectRatio`, `show/showMaximized/hide/close`.
 
+### Example: plugin window
+
+```cpp
+void* host_handle = /* HWND/NSView/etc from host */;
+auto window = visage::createPluginWindow(800, 600, host_handle);
+window->setWindowTitle("Embedded Visage");
+window->setDrawCallback([](double t) {
+  visage::Renderer::instance().updateTime(t);
+});
+window->show();
+window->runEventLoop();
+```
+
 ## DPI and coordinates
 
 - `dpiScale()` reflects platform scale; conversions `convertToNative` / `convertToLogical`.

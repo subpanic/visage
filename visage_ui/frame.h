@@ -35,6 +35,7 @@
 namespace visage {
   class Frame;
 
+  /// Hooks provided by the hosting window/editor so Frames can request redraws, focus, and cursor changes.
   struct FrameEventHandler {
     std::function<void(Frame*)> request_redraw = nullptr;
     std::function<void(Frame*)> request_keyboard_focus = nullptr;
@@ -46,6 +47,11 @@ namespace visage {
     std::function<void(std::string)> set_clipboard_text = nullptr;
   };
 
+  /// Core UI node: owns bounds, layout, drawing, input handling, and child hierarchy.
+  ///
+  /// Frames form a tree. Each frame can override lifecycle methods (`init`, `draw`,
+  /// `resized`, `dpiChanged`, etc.) and input handlers. Redraws are region-based
+  /// and routed through the hosting ApplicationEditor via FrameEventHandler callbacks.
   class Frame {
   public:
     Frame() = default;
@@ -78,8 +84,11 @@ namespace visage {
     auto& onKeyRelease() { return on_key_release_; }
     auto& onTextInput() { return on_text_input_; }
 
+    /// Called once before the first draw; override to initialize resources and children.
     virtual void init() { initChildren(); }
+    /// Override to render this frame into the given canvas.
     virtual void draw(Canvas& canvas) { }
+    /// Called before destruction; override to release resources. Destroys children by default.
     virtual void destroy() { destroyChildren(); }
 
     virtual void resized() { }
@@ -113,6 +122,7 @@ namespace visage {
     virtual std::string startDragDropSource() { return ""; }
     virtual void cleanupDragDropSource() { }
 
+    /// Assign a palette; cascades to children.
     void setPalette(Palette* palette) {
       palette_ = palette;
       for (Frame* child : children_)
@@ -131,11 +141,13 @@ namespace visage {
     theme::OverrideId paletteOverride() const { return palette_override_; }
 
     bool initialized() const { return initialized_; }
+    /// Mark this frame dirty; hosting editor will repaint dirty regions.
     void redraw() {
       if (isVisible() && isDrawing() && !redrawing_)
         redrawing_ = requestRedraw();
     }
 
+    /// Mark this frame and all descendants dirty.
     void redrawAll() {
       redraw();
       for (Frame* child : children_)
@@ -193,17 +205,23 @@ namespace visage {
     const std::string& name() const { return name_; }
     void setName(std::string name) { name_ = std::move(name); }
 
+    /// Show or hide the frame without removing it from the hierarchy.
     void setVisible(bool visible);
     bool isVisible() const { return visible_; }
+    /// Enable/disable drawing while keeping layout and input active.
     void setDrawing(bool drawing);
     bool isDrawing() const { return drawing_; }
+    /// Controls z-order within the parent; drawn above siblings when true.
     void setOnTop(bool on_top);
     bool isOnTop() const { return on_top_; }
 
+    /// Adds a child frame and optionally marks it visible.
     void addChild(Frame* child, bool make_visible = true);
     void addChild(Frame& child, bool make_visible = true) { addChild(&child, make_visible); }
     void addChild(std::unique_ptr<Frame> child, bool make_visible = true);
+    /// Remove a child; ownership is respected.
     void removeChild(Frame* child);
+    /// Remove and destroy all children.
     void removeAllChildren();
     int indexOfChild(const Frame* child) const;
     void setParent(Frame* parent) {
@@ -241,6 +259,7 @@ namespace visage {
     Frame* frameAtPoint(Point point);
     Frame* topParentFrame();
 
+    /// Set logical bounds (x, y, width, height).
     void setBounds(Bounds bounds);
     void setBounds(float x, float y, float width, float height) {
       setBounds({ x, y, width, height });
@@ -249,14 +268,18 @@ namespace visage {
     void setNativeBounds(int x, int y, int width, int height) {
       setNativeBounds({ x, y, width, height });
     }
+    /// Returns the bounding box after applying this frame's layout to given bounds.
     IBounds computeLayoutBoundingBox(IBounds bounds) const;
+    /// Recompute layout for all children.
     void computeLayout();
+    /// Recompute layout for a specific child.
     void computeLayout(Frame* child);
     const Bounds& bounds() const { return bounds_; }
     void setTopLeft(float x, float y) { setBounds(x, y, width(), height()); }
     Point topLeft() const { return { bounds_.x(), bounds_.y() }; }
 
     bool hasLayout() const { return layout_ != nullptr; }
+    /// Returns (or creates) the layout object for this frame.
     Layout& layout() {
       if (layout_ == nullptr)
         layout_ = std::make_unique<Layout>();

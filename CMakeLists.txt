@@ -126,10 +126,29 @@ if (VISAGE_BUILD_DOCS)
     set(DOXYGEN_XML ${DOCS_DIR}/_build/doxygen/xml/index.xml)
     set(SPHINX_HTML ${DOCS_DIR}/_build/html/index.html)
 
+    file(GLOB_RECURSE DOC_SOURCES CONFIGURE_DEPENDS
+      ${DOCS_DIR}/*.md
+      ${DOCS_DIR}/*.rst
+      ${DOCS_DIR}/*.py
+      ${DOCS_DIR}/conf.py
+    )
+    list(FILTER DOC_SOURCES EXCLUDE REGEX ".*/_build/.*")
+
+    file(GLOB_RECURSE PUBLIC_HEADERS CONFIGURE_DEPENDS
+      ${CMAKE_CURRENT_SOURCE_DIR}/visage_app/*.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/visage_graphics/*.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/visage_ui/*.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/visage_widgets/*.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/visage_windowing/*.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/visage_utils/*.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/visage_file_embed/*.h
+    )
+
     add_custom_command(
       OUTPUT ${DOXYGEN_XML}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${DOCS_DIR}/_build/doxygen
       COMMAND ${DOXYGEN_EXECUTABLE} ${DOCS_DIR}/Doxyfile
+      DEPENDS ${DOCS_DIR}/Doxyfile ${PUBLIC_HEADERS}
       WORKING_DIRECTORY ${DOCS_DIR}
       COMMENT "Generating Doxygen XML"
       VERBATIM
@@ -137,7 +156,7 @@ if (VISAGE_BUILD_DOCS)
 
     add_custom_command(
       OUTPUT ${SPHINX_HTML}
-      DEPENDS ${DOXYGEN_XML}
+      DEPENDS ${DOXYGEN_XML} ${DOC_SOURCES}
       COMMAND ${CMAKE_COMMAND} -E make_directory ${DOCS_DIR}/_build/html
       COMMAND ${SPHINX_EXECUTABLE} -b html ${DOCS_DIR} ${DOCS_DIR}/_build/html
       WORKING_DIRECTORY ${DOCS_DIR}

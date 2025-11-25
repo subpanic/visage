@@ -8,6 +8,22 @@
 - Logical vs native pixels: `Canvas::setDpiScale` and `setLogicalPixelScale`/`setNativePixelScale`.
 - Time helpers (`updateTime`, `deltaTime`, `frameCount`) for animation.
 
+### Quick draw example
+
+```cpp
+app.onDraw() = [&](visage::Canvas& c) {
+  c.setColor(0xff223344);
+  c.fill(0, 0, app.width(), app.height());
+
+  c.setColor(visage::Brush::linear(0xff66ccff, 0xffff66cc, {0, 0}, {app.width(), app.height()}));
+  c.squircle(40, 40, 200);
+
+  visage::Font title(24, visage::fonts::Lato_Regular_ttf, app.dpiScale());
+  c.setColor(0xffffffff);
+  c.text(title, "Hello Visage", 60, 80);
+};
+```
+
 ## Core primitives
 
 - Shapes: rectangles, circles, squircles, arcs, rings, paths (`shapes.h`, `path.h`).
@@ -16,11 +32,31 @@
 - SVG: loading and drawing (`svg.h`).
 - Effects: blur, bloom, post-processing (`post_effects.h`), backdrop effects, alpha/caching.
 
+### Post-effect snippet
+
+```cpp
+auto blur = std::make_unique<visage::BlurPostEffect>();
+blur->setBlurRadius(24.0f);
+
+content_frame.setPostEffect(blur.get());           // applies when drawing this frame
+overlay_frame.setBackdropEffect(blur.get());       // blur content behind overlay
+```
+
 ## Rendering backend
 
 - `Renderer` (`visage_graphics/renderer.h`) wraps bgfx; supports swap-chain and windowless contexts.
 - Platform shader transpilation handled via bgfx toolchain (HLSL→SPIR-V→GL/Metal/D3D).
 - Optional background rendering thread (`VISAGE_ENABLE_BACKGROUND_GRAPHICS_THREAD`) for multi-threaded submission.
+
+### Windowless rendering
+
+```cpp
+visage::ApplicationEditor editor;
+editor.setWindowless(800, 600);
+editor.onDraw() = [&](visage::Canvas& c) { /* draw */ };
+editor.drawWindow();
+auto& shot = editor.takeScreenshot(); // use shot.pixels/width/height
+```
 
 ## Theming
 
