@@ -1,5 +1,7 @@
 # Assets and Embedding
 
+Related guides: [Graphics](graphics), [Paths](paths), [Shaders](shaders), [Animation](animation), [Theming](theming), [Examples](examples), [Architecture](architecture), [Getting Started](getting-started)
+
 ## Build-time embedding
 
 Headers to include: generated headers from `add_embedded_resources` (e.g., `"my_assets.h"`), and for built-ins: `<visage_graphics/shaders.h>`, `<visage_graphics/fonts.h>`, `<visage_graphics/icons.h>`.

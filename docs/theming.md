@@ -2,6 +2,8 @@
 
 Headers to include: `#include <visage_graphics/theme.h>`, `#include <visage_graphics/palette.h>`, and your generated theme definitions if applicable.
 
+Related guides: [Graphics](graphics), [UI & Layout](ui-layout), [Paths](paths), [Shaders](shaders), [Animation](animation), [Assets/Embedding](assets-embedding), [Widgets](widgets), [Examples](examples), [Architecture](architecture), [Getting Started](getting-started)
+
 ## Overview: themes vs palettes
 
 - **Themes (IDs)**: Compile-time identifiers defined with `VISAGE_THEME_COLOR` / `VISAGE_THEME_VALUE` in `visage_graphics/theme.h`. They describe *what* needs styling (e.g., Background, Accent, Radius) and carry a default value and group name.

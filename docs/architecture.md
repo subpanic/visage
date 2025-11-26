@@ -1,5 +1,7 @@
 # Architecture
 
+Related guides: [Getting Started](getting-started), [Graphics](graphics), [UI & Layout](ui-layout), [Paths](paths), [Shaders](shaders), [Animation](animation), [Assets/Embedding](assets-embedding), [Theming](theming), [Windowing](windowing), [Examples](examples)
+
 ## High-level flow
 
 1. **Windowing**: Platform-specific `Window` backends (`visage_windowing/windowing.h` and platform folders) surface native events and draw callbacks.

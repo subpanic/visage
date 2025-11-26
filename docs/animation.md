@@ -2,6 +2,8 @@
 
 Headers to include: `#include <visage_ui/events.h>` (EventTimer/runOnEventThread), `#include <visage_graphics/canvas.h>` (time helpers), and your frame/widget headers.
 
+Related guides: [Graphics](graphics), [Paths](paths), [Shaders](shaders), [Assets/Embedding](assets-embedding), [Theming](theming), [Examples](examples), [Architecture](architecture), [Getting Started](getting-started)
+
 ## Ways to drive animation
 
 - **EventTimer** (`visage_ui/events.h`): Start a timer with `startTimer(ms)`; override `timerCallback` and call `redraw()`. Runs on the UI/event thread.

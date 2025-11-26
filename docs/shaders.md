@@ -2,6 +2,8 @@
 
 Visage ships cross-platform shaders compiled at build time and lets you author custom ones for effects or overlays.
 
+Related guides: [Graphics](graphics), [Paths](paths), [Animation](animation), [Assets/Embedding](assets-embedding), [Theming](theming), [Examples](examples)
+
 ## Where shaders live
 
 Headers to include for built-ins: `<visage_graphics/shaders.h>`, `<visage_graphics/post_effects.h>`. For your shaders, include the generated header you declared in CMake.

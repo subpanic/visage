@@ -1,5 +1,7 @@
 # Getting Started
 
+Related guides: [Architecture](architecture), [Graphics](graphics), [UI & Layout](ui-layout), [Paths](paths), [Shaders](shaders), [Animation](animation), [Assets/Embedding](assets-embedding), [Theming](theming), [Windowing](windowing), [Examples](examples)
+
 ## Build the library
 
 Visage uses CMake (>=3.17) and C++17. Typical native build:

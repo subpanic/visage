@@ -16,6 +16,7 @@ widgets
 assets-embedding
 shaders
 animation
+paths
 examples
 faq-troubleshooting
 ```

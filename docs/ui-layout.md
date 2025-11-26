@@ -1,5 +1,7 @@
 # UI and Layout
 
+Related guides: [Graphics](graphics), [Paths](paths), [Shaders](shaders), [Animation](animation), [Theming](theming), [Windowing](windowing), [Examples](examples), [Architecture](architecture), [Getting Started](getting-started)
+
 ## Frame tree
 
 Headers to include: `#include <visage_ui/frame.h>`, `#include <visage_ui/events.h>` for event structs, and palette/theme headers (`<visage_graphics/palette.h>`, `<visage_graphics/theme.h>`) when styling.

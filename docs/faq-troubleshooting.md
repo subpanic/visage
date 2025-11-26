@@ -1,5 +1,7 @@
 # FAQ and Troubleshooting
 
+Related guides: [Graphics](graphics), [UI & Layout](ui-layout), [Paths](paths), [Shaders](shaders), [Animation](animation), [Assets/Embedding](assets-embedding), [Theming](theming), [Examples](examples), [Architecture](architecture), [Getting Started](getting-started)
+
 ## Build issues
 
 - **Graphics dependencies fail to fetch**: ensure network access during CMake configure; bgfx/bx/bimg and freetype are pulled via `FetchContent` in `visage_graphics/CMakeLists.txt`.

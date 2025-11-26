@@ -4,6 +4,8 @@ Visage ships a set of higher-level UI controls built on `Frame`. Public headers 
 
 Headers to include: include the specific widget header (e.g., `#include <visage_widgets/button.h>`, `text_editor.h`, `color_picker.h`), and `#include <visage_graphics/font.h>` plus generated fonts header for text.
 
+Related guides: [UI & Layout](ui-layout), [Graphics](graphics), [Paths](paths), [Shaders](shaders), [Animation](animation), [Theming](theming), [Examples](examples), [Architecture](architecture), [Getting Started](getting-started)
+
 ## Available widgets (high level)
 
 - Buttons (`button.h`)

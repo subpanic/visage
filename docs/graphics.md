@@ -1,5 +1,7 @@
 # Graphics
 
+Related guides: [UI & Layout](ui-layout), [Paths](paths), [Shaders](shaders), [Animation](animation), [Assets/Embedding](assets-embedding), [Theming](theming), [Windowing](windowing), [Examples](examples), [Architecture](architecture), [Getting Started](getting-started)
+
 ## Drawing approaches at a glance
 
 - **Canvas immediate mode (most common)**  
