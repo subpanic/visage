@@ -43,21 +43,32 @@ public:
 ## Layout
 
 - Flex-inspired layout in `visage_ui/layout.h` with grow/shrink, gaps, wrap, alignment, margins, and padding.
-- Dimensions use `visage_utils/dimension.h` (px, percent, or native units) to express responsive sizing.
+- Dimensions use `visage_utils/dimension.h` to express logical pixels, native pixels, and percentages of parent bounds.
 - `computeLayout` populates child bounds relative to parents; bounding boxes available for measurement.
+
+### Dimension helpers
+
+Headers to include: `#include <visage_utils/dimension.h>` and optionally `using namespace visage::dimension;` for literals.
+
+- Logical pixels: `Dimension::logicalPixels(12)` or `12_px` literal (scales with DPI).
+- Native pixels: `Dimension::nativePixels(12)` or `12_npx` literal (no DPI scaling).
+- Percent: `Dimension::widthPercent(30)` / `Dimension::heightPercent(50)` relative to parent.
+- View min/max: `Dimension::viewMinPercent(70)` / `viewMaxPercent(...)` for responsive sizing based on the smaller/larger viewport edge (used in examples).
 
 ### Flex example
 
 Headers to include: `#include <visage_ui/layout.h>`, `#include <visage_utils/dimension.h>`
 
 ```cpp
+using namespace visage::dimension;
+
 root.layout().setFlex(true);
-root.layout().setFlexGap(visage::Dimension::pixels(8));
-root.layout().setPadding(visage::Dimension::pixels(12));
+root.layout().setFlexGap(8_px);
+root.layout().setPadding(12_px);
 
 for (auto* child : root.children()) {
   child->layout().setFlexGrow(1.0f);
-  child->layout().setMargin(visage::Dimension::pixels(4));
+  child->layout().setMargin(4_px);
 }
 
 root.computeLayout();
@@ -80,15 +91,17 @@ root.computeLayout();
 ### Wrapped grid example
 
 ```cpp
+using namespace visage::dimension;
+
 auto& layout = grid.layout();
 layout.setFlex(true);
 layout.setFlexWrap(true);
-layout.setFlexGap(visage::Dimension::pixels(10));
+layout.setFlexGap(10_px);
 layout.setFlexWrapAlignment(visage::Layout::WrapAlignment::SpaceEvenly);
 
 for (auto* tile : grid.children()) {
-  tile->layout().setWidth(visage::Dimension::percent(30)); // approx 3 per row
-  tile->layout().setHeight(visage::Dimension::pixels(120));
+  tile->layout().setWidth(visage::Dimension::widthPercent(30)); // approx 3 per row
+  tile->layout().setHeight(120_px);
   tile->layout().setFlexGrow(1.0f); // allow stretching with available space
 }
 

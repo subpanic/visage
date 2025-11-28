@@ -12,6 +12,38 @@ Related guides: [Graphics](graphics), [Paths](paths), [Shaders](shaders), [Asset
 - **Background graphics thread**: If `VISAGE_ENABLE_BACKGROUND_GRAPHICS_THREAD` is ON (non-emscripten), rendering can happen on a separate thread; keep shared state thread-safe.
 - **Cross-thread updates**: From other threads (e.g., audio), use `runOnEventThread` to post a lambda that updates UI state and calls `redraw()`.
 
+## EventTimer details
+
+- Runs on the UI/event thread. Keep work light and drive rendering via `redraw()` rather than heavy computation in the callback.
+- `startTimer(ms)` arms the timer; `stopTimer()` pauses it. `isRunning()` reports status. Timers coalesce with the event loop, so short intervals still respect platform scheduling.
+- Override `timerCallback()` or attach to `onTimerCallback()`. Use member state; do not capture `this` in a lambda stored on `EventTimer` itself.
+- Dynamic cadence: call `startTimer(new_ms)` from inside `timerCallback` to change intervals (e.g., adaptive throttling).
+- Manual tick: `checkTimer(current_time_ms)` lets you feed custom clocks (rarely needed; typically the event loop calls this for you).
+
+Example: start on demand and pause when idle
+```cpp
+class Meter : public visage::Frame, public visage::EventTimer {
+public:
+  void setLevel(float level) {
+    level_ = level;
+    if (!isRunning()) startTimer(33); // ~30fps while active
+  }
+
+  void timerCallback() override {
+    decay_ *= 0.92f;
+    if (decay_ < 0.01f) stopTimer();
+    redraw();
+  }
+
+  void draw(visage::Canvas& c) override {
+    // draw using level_ and decay_
+  }
+private:
+  float level_ = 0.0f;
+  float decay_ = 1.0f;
+};
+```
+
 ## Patterns
 
 - **Timer-based** (e.g., 60fps):  

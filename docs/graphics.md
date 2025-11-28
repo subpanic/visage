@@ -17,7 +17,10 @@ Related guides: [UI & Layout](ui-layout), [Paths](paths), [Shaders](shaders), [A
 ## Canvas model (immediate mode)
 
 - Shapes, text, SVG, images, gradients, post-effects, blend modes; dirty-region redraw.
-- Logical vs native pixels via `Canvas::setDpiScale`, `setLogicalPixelScale`, `setNativePixelScale`.
+- Logical vs native pixels via `Canvas::setDpiScale`, `setLogicalPixelScale`, `setNativePixelScale`; DPI comes from the hosting `ApplicationWindow`.
+- Save/restore state with `saveState`/`restoreState` to manage position, clamp, blend mode, and palette overrides.
+- Clamp drawing to a rect with `setClampBounds` (resets on `restoreState`); keep redraw regions tight.
+- Layers: `setBlendMode` controls blending per draw call; use separate layers if you need different z-order or mask composition.
 - Time helpers (`updateTime`, `deltaTime`, `frameCount`) for animation. Use {doc}`animation` for timing patterns.
 
 ### Quick draw example
@@ -36,11 +39,41 @@ app.onDraw() = [&](visage::Canvas& c) {
 };
 ```
 
+### Canvas essentials in practice
+
+```cpp
+visage::Font label_font(14.0f, visage::fonts::Lato_Regular_ttf, c.dpiScale());
+visage::Path ring;
+ring.circle({0, 0}, 100.0f);                // build once and reuse
+
+c.saveState();
+c.setClampBounds(20, 20, c.width() - 40, c.height() - 40);
+c.setColor(visage::Brush::radial(0xff1c1f2b, 0xff0f1118, {0.5f, 0.5f}));
+c.fill(0, 0, c.width(), c.height());       // clamped, avoids touching edges
+
+c.setBlendMode(visage::BlendMode::Add);
+c.setColor(0x44ff99ff);
+c.stroke(ring, c.width() * 0.5f - 110, c.height() * 0.5f - 110,
+         220, 220, 6.0f);
+
+c.setBlendMode(visage::BlendMode::Alpha);
+c.setColor(0xffffffff);
+c.text("Status: Ready", label_font, visage::Font::kBottomRight,
+       0, 0, c.width() - 32, c.height() - 24);
+c.restoreState();
+```
+
+Tips:
+- Build shapes/paths once; mutate brushes and positions each frame.
+- Palette-aware colors: `c.setColor(theme::ColorId::...)` to respect themes/overrides.
+- For masks, use `BlendMode::MaskAdd`/`MaskRemove`; for glow/overlays use `Add` or `Multiply`.
+- Switch to `setNativePixelScale()` before pixel-perfect captures, then back to logical scale.
+
 ## Core primitives (Canvas)
 
 - Shapes: rectangles, circles, squircles, arcs, rings, paths (`shapes.h`, `path.h`).
 - Brushes/colors: solid, gradients, palette-driven (`palette.h`, `theme.h`).
-- Text: fonts (`font.h`), layout (`text.h`), emoji.
+- Text: fonts (`font.h`), layout (`text.h`), emoji. See {doc}`fonts-and-text` for more.
 - SVG: `svg.h`.
 - Effects: blur, bloom, post-processing (`post_effects.h`), backdrop effects, alpha/caching.
 

@@ -9,6 +9,7 @@ Welcome to the Visage docs. This site covers the core architecture, guides for c
 getting-started
 architecture
 graphics
+fonts-and-text
 ui-layout
 windowing
 theming

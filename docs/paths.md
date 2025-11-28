@@ -17,6 +17,7 @@ Common methods:
 - `arc(center, radius, startRadians, radians)`
 - `rectangle(x, y, w, h)`, `roundedRectangle(...)`
 - `squircle(...)`, `ellipse(...)`
+- SVG-style helpers exist on `Path::CommandList`: `arcTo`, `horizontalTo`, `verticalTo`, `smoothBezierTo`, `smoothQuadraticTo`, etc.
 
 Bounding box: `path.boundingBox()` gives `{left, top, right, bottom}` in path-local space.
 
@@ -46,6 +47,16 @@ Fill-in-place (no scaling, uses path’s own bounds):
 canvas.fill(p, 10, 10);
 ```
 
+Stroke with dashes and miters:
+```cpp
+std::vector<float> dash = { 8.0f, 4.0f }; // on/off
+canvas.setColor(0xffe89cff);
+canvas.stroke(p, 10, 10, 200, 200, 6.0f,
+              visage::Path::Join::Miter,
+              visage::Path::EndCap::Butt,
+              dash, /*dash_offset=*/canvas.time() * 20.0f);
+```
+
 ## Scaling and positioning
 
 - `fill(path, x, y, width, height)`: scales the path to the target width/height at position.
@@ -69,6 +80,31 @@ Paths are anti-aliased by default via the renderer. Keep stroke widths sensible;
 - Avoid excessive point counts when a curve suffices.
 - Keep redraw regions tight—only `redraw()` when path data changes.
 - Batch-friendly: paths are batched with other shapes per layer; reduce state changes (blend mode/brush) to maximize batching.
+
+## Animating paths
+
+- **Dash offset / stroke animation**: vary the `dash_offset` parameter each frame (see stroke example above) for marching ants or loading rings.
+- **Shape morphing**: rebuild a path each tick based on a parameter (e.g., lerp control points), then `redraw()`.
+- **Transforms without rebuild**: draw the same `Path` at different positions/sizes by changing the `fill`/`stroke` arguments; only rebuild when topology changes.
+
+Example: orbiting arc with `EventTimer`
+```cpp
+class Orbit : public visage::Frame, public visage::EventTimer {
+public:
+  Orbit() { startTimer(16); }
+  void timerCallback() override { angle_ += 0.05f; redraw(); }
+  void draw(visage::Canvas& c) override {
+    visage::Path ring;
+    ring.arc({0, 0}, 1.0f, angle_, 1.5f);   // arc(center, radius, start, radians)
+    float size = std::min(width(), height()) * 0.6f;
+    c.setColor(0xff66ccff);
+    c.stroke(ring, width() * 0.2f, height() * 0.2f, size, size, 8.0f,
+             visage::Path::Join::Round, visage::Path::EndCap::Round);
+  }
+private:
+  float angle_ = 0.0f;
+};
+```
 
 ## Examples to study
 
