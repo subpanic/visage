@@ -21,23 +21,52 @@
 
 #pragma once
 
-#include "visage_graphics/shader.h"
-#include "visage_ui/frame.h"
+#include "graphics_utils.h"
+
+#include <memory>
 
 namespace visage {
-  class ShaderQuad : public Frame {
+  class ShaderDataTexture {
   public:
-    ShaderQuad(const EmbeddedFile& vertex_shader, const EmbeddedFile& fragment_shader, BlendMode state);
-    ~ShaderQuad() override = default;
+    enum class Format {
+      RGBA8,
+      Float32,
+    };
 
-    Shader& shader() { return shader_; }
-    const Shader& shader() const { return shader_; }
+    enum class Filter {
+      Point,
+      Linear,
+    };
 
-    void draw(Canvas& canvas) override;
+    enum class Wrap {
+      Clamp,
+      Repeat,
+    };
+
+    explicit ShaderDataTexture(Format format = Format::RGBA8, Filter filter = Filter::Linear,
+                               Wrap wrap = Wrap::Clamp);
+    ~ShaderDataTexture();
+
+    ShaderDataTexture(const ShaderDataTexture&) = delete;
+    ShaderDataTexture& operator=(const ShaderDataTexture&) = delete;
+    ShaderDataTexture(ShaderDataTexture&&) noexcept;
+    ShaderDataTexture& operator=(ShaderDataTexture&&) noexcept;
+
+    void reset();
+    void resize(int width, int height);
+    void update(const void* data, int width, int height);
+
+    bool hasHandle() const;
+    int width() const;
+    int height() const;
+    Format format() const;
+    Filter filter() const;
+    Wrap wrap() const;
+
+    const bgfx::TextureHandle& textureHandle() const;
 
   private:
-    Shader shader_;
-
-    VISAGE_LEAK_CHECKER(ShaderQuad)
+    struct State;
+    std::unique_ptr<State> state_;
   };
 }

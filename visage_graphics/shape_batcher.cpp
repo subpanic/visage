@@ -35,6 +35,65 @@
 #include <bgfx/bgfx.h>
 
 namespace visage {
+  namespace {
+    static constexpr int kFirstCustomShaderTextureStage = 3;
+
+    bool isReservedShaderBindingName(const std::string& name) {
+      return name == Uniforms::kTime ||
+             name == Uniforms::kMult ||
+             name == Uniforms::kTextureClamp ||
+             name == Uniforms::kBounds ||
+             name == Uniforms::kColor ||
+             name == Uniforms::kColorMult ||
+             name == Uniforms::kLimitMult ||
+             name == Uniforms::kOriginFlip ||
+             name == Uniforms::kAtlasScale ||
+             name == Uniforms::kAtlasScale2 ||
+             name == Uniforms::kCenterPosition ||
+             name == Uniforms::kDimensions ||
+             name == Uniforms::kLineWidth ||
+             name == Uniforms::kResampleValues ||
+             name == Uniforms::kResampleValues2 ||
+             name == Uniforms::kThreshold ||
+             name == Uniforms::kPixelSize ||
+             name == Uniforms::kGradient ||
+             name == Uniforms::kTexture ||
+             name == Uniforms::kTexture2 ||
+             name == Uniforms::kGradientTexturePosition ||
+             name == Uniforms::kGradientPosition ||
+             name == Uniforms::kGradientPosition2 ||
+             name == Uniforms::kRadialGradient;
+    }
+
+    void bindCustomShaderTextures(const Shader& shader) {
+      int stage = kFirstCustomShaderTextureStage;
+      for (const auto& texture : shader.textureBindings()) {
+        if (isReservedShaderBindingName(texture.first)) {
+          VISAGE_ASSERT(false);
+          continue;
+        }
+
+        if (texture.second.handle == nullptr || !bgfx::isValid(*texture.second.handle))
+          continue;
+
+        bgfx::setTexture(stage++,
+                         UniformCache::uniformHandle(texture.first.c_str(), UniformCache::Sampler),
+                         *texture.second.handle);
+      }
+    }
+
+    void bindCustomShaderUniforms(const Shader& shader) {
+      for (const auto& uniform : shader.uniforms()) {
+        if (isReservedShaderBindingName(uniform.first)) {
+          VISAGE_ASSERT(false);
+          continue;
+        }
+
+        bgfx::setUniform(UniformCache::uniformHandle(uniform.first.c_str()), uniform.second.data);
+      }
+    }
+  }
+
   static constexpr uint64_t blendModeValue(BlendMode blend_mode) {
     switch (blend_mode) {
     case BlendMode::Opaque:
@@ -360,14 +419,16 @@ namespace visage {
     if (quads.vertices == nullptr)
       return;
 
+    Shader* shader = batches[0].shapes->front().shader;
     setUniform<Uniforms::kRadialGradient>(quads.radial_gradient ? 1.0f : 0.0f);
-    setBlendMode(BlendMode::Alpha);
+    setBlendMode(shader->state());
     setTimeUniform(layer.time());
     setUniformDimensions(layer.width(), layer.height());
     setTexture<Uniforms::kGradient>(0, layer.gradientAtlas()->colorTextureHandle());
     setColorMult(layer.hdr());
     setOriginFlipUniform(layer.bottomLeftOrigin());
-    Shader* shader = batches[0].shapes->front().shader;
+    bindCustomShaderTextures(*shader);
+    bindCustomShaderUniforms(*shader);
     bgfx::submit(submit_pass,
                  ProgramCache::programHandle(shader->vertexShader(), shader->fragmentShader()));
   }

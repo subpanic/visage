@@ -24,11 +24,22 @@
 #include "graphics_utils.h"
 #include "visage_file_embed/embedded_file.h"
 
+#include <map>
+#include <string>
+
 namespace visage {
   class Canvas;
 
   class Shader {
   public:
+    struct UniformData {
+      float data[4];
+    };
+
+    struct TextureBinding {
+      const bgfx::TextureHandle* handle = nullptr;
+    };
+
     Shader() = delete;
     Shader(const EmbeddedFile& vertex_shader, const EmbeddedFile& fragment_shader, BlendMode state) :
         vertex_shader_(vertex_shader), fragment_shader_(fragment_shader), state_(state) { }
@@ -38,9 +49,59 @@ namespace visage {
     const EmbeddedFile& fragmentShader() const { return fragment_shader_; }
     BlendMode state() const { return state_; }
 
+    void setUniformValue(const std::string& name, float value) {
+      setUniformValue(name, value, value, value, value);
+    }
+
+    void setUniformValue(const std::string& name, float value1, float value2, float value3,
+                         float value4) {
+      if (name.empty()) {
+        VISAGE_ASSERT(false);
+        return;
+      }
+
+      if (textures_.count(name) > 0) {
+        VISAGE_ASSERT(false);
+        return;
+      }
+
+      uniforms_[name] = { { value1, value2, value3, value4 } };
+    }
+
+    void removeUniform(const std::string& name) { uniforms_.erase(name); }
+    void clearUniforms() { uniforms_.clear(); }
+
+    void setTextureBinding(const std::string& name, const bgfx::TextureHandle* handle) {
+      if (name.empty()) {
+        VISAGE_ASSERT(false);
+        return;
+      }
+
+      if (handle == nullptr) {
+        VISAGE_ASSERT(false);
+        textures_.erase(name);
+        return;
+      }
+
+      if (uniforms_.count(name) > 0) {
+        VISAGE_ASSERT(false);
+        return;
+      }
+
+      textures_[name] = TextureBinding { handle };
+    }
+
+    void removeTextureBinding(const std::string& name) { textures_.erase(name); }
+    void clearTextureBindings() { textures_.clear(); }
+
+    const std::map<std::string, UniformData>& uniforms() const { return uniforms_; }
+    const std::map<std::string, TextureBinding>& textureBindings() const { return textures_; }
+
   private:
     EmbeddedFile vertex_shader_;
     EmbeddedFile fragment_shader_;
     BlendMode state_ = BlendMode::Alpha;
+    std::map<std::string, UniformData> uniforms_;
+    std::map<std::string, TextureBinding> textures_;
   };
 }

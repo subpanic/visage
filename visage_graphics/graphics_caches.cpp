@@ -166,7 +166,12 @@ namespace visage {
   }
 
   struct UniformCacheMap {
-    std::map<std::string, bgfx::UniformHandle> cache;
+    struct CachedUniform {
+      bgfx::UniformHandle handle = BGFX_INVALID_HANDLE;
+      UniformCache::Type type = UniformCache::Vec4;
+    };
+
+    std::map<std::string, CachedUniform> cache;
   };
 
   UniformCache::UniformCache() {
@@ -175,12 +180,14 @@ namespace visage {
 
   UniformCache::~UniformCache() {
     for (const auto& uniform : cache_->cache)
-      bgfx::destroy(uniform.second);
+      bgfx::destroy(uniform.second.handle);
   }
 
   bgfx::UniformHandle& UniformCache::handle(const char* name, Type type, int size) const {
-    if (cache_->cache.count(name))
-      return cache_->cache[name];
+    if (cache_->cache.count(name)) {
+      VISAGE_ASSERT(cache_->cache[name].type == type);
+      return cache_->cache[name].handle;
+    }
 
     bgfx::UniformType::Enum bgfx_type = bgfx::UniformType::Vec4;
     switch (type) {
@@ -190,7 +197,7 @@ namespace visage {
     case Mat4: bgfx_type = bgfx::UniformType::Mat4; break;
     }
 
-    cache_->cache[name] = bgfx::createUniform(name, bgfx_type, size);
-    return cache_->cache[name];
+    cache_->cache[name] = { bgfx::createUniform(name, bgfx_type, size), type };
+    return cache_->cache[name].handle;
   }
 }
