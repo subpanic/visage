@@ -29,6 +29,13 @@
 
 namespace visage {
   class Canvas;
+  class ShaderRenderTarget;
+
+  enum class ShaderRenderTargetBuffer {
+    Current,
+    Read,
+    Write,
+  };
 
   class Shader {
   public:
@@ -38,6 +45,8 @@ namespace visage {
 
     struct TextureBinding {
       const bgfx::TextureHandle* handle = nullptr;
+      const ShaderRenderTarget* render_target = nullptr;
+      ShaderRenderTargetBuffer render_target_buffer = ShaderRenderTargetBuffer::Current;
     };
 
     Shader() = delete;
@@ -89,6 +98,27 @@ namespace visage {
       }
 
       textures_[name] = TextureBinding { handle };
+    }
+
+    void setRenderTargetBinding(const std::string& name, const ShaderRenderTarget* render_target,
+                                ShaderRenderTargetBuffer buffer = ShaderRenderTargetBuffer::Current) {
+      if (name.empty()) {
+        VISAGE_ASSERT(false);
+        return;
+      }
+
+      if (render_target == nullptr) {
+        VISAGE_ASSERT(false);
+        textures_.erase(name);
+        return;
+      }
+
+      if (uniforms_.count(name) > 0) {
+        VISAGE_ASSERT(false);
+        return;
+      }
+
+      textures_[name] = TextureBinding { nullptr, render_target, buffer };
     }
 
     void removeTextureBinding(const std::string& name) { textures_.erase(name); }

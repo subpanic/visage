@@ -22,12 +22,14 @@
 #pragma once
 
 #include "graphics_utils.h"
+#include "multi_pass_shader.h"
 #include "post_effects.h"
 #include "shapes.h"
 #include "visage_utils/space.h"
 
 #include <algorithm>
 #include <numeric>
+#include <type_traits>
 
 namespace visage {
   class Shader;
@@ -77,6 +79,8 @@ namespace visage {
 
   void submitText(const BatchVector<TextBlock>& batches, const Layer& layer, int submit_pass);
   void submitShader(const BatchVector<ShaderWrapper>& batches, const Layer& layer, int submit_pass);
+  int submitMultiPassShader(const BatchVector<MultiPassShaderWrapper>& batches,
+                            const Layer& layer, int submit_pass);
   void submitSampleRegions(const BatchVector<SampleRegion>& batches, const Layer& layer, int submit_pass);
 
   template<typename V>
@@ -182,6 +186,13 @@ namespace visage {
   }
 
   template<>
+  inline void submitShapes<MultiPassShaderWrapper>(const BatchVector<MultiPassShaderWrapper>& batches,
+                                                   BlendMode state, Layer& layer, int submit_pass) {
+    setBlendMode(state);
+    submitMultiPassShader(batches, layer, submit_pass);
+  }
+
+  template<>
   inline void submitShapes<TextBlock>(const BatchVector<TextBlock>& batches, BlendMode state,
                                       Layer& layer, int submit_pass) {
     setBlendMode(state);
@@ -215,7 +226,7 @@ namespace visage {
     explicit SubmitBatch(BlendMode blend_mode) : blend_mode_(blend_mode) { }
     virtual ~SubmitBatch() = default;
     virtual void clear() = 0;
-    virtual void submit(Layer& layer, int submit_pass, const std::vector<PositionedBatch>& others) = 0;
+    virtual int submit(Layer& layer, int submit_pass, const std::vector<PositionedBatch>& others) = 0;
 
     bool overlapsShape(const BaseShape& shape) const {
       int x = shape.x;
@@ -286,7 +297,7 @@ namespace visage {
       shapes_.clear();
     }
 
-    void submit(Layer& layer, int submit_pass, const std::vector<PositionedBatch>& batches) override {
+    int submit(Layer& layer, int submit_pass, const std::vector<PositionedBatch>& batches) override {
       BatchVector<T> batch_list;
       batch_list.reserve(batches.size());
       for (const PositionedBatch& batch : batches) {
@@ -294,7 +305,10 @@ namespace visage {
         const std::vector<T>* shapes = &reinterpret_cast<ShapeBatch<T>*>(batch.batch)->shapes_;
         batch_list.emplace_back(shapes, batch.invalid_rects, batch.x, batch.y);
       }
+      if constexpr (std::is_same_v<T, MultiPassShaderWrapper>)
+        return submitMultiPassShader(batch_list, layer, submit_pass);
       submitShapes(batch_list, blendMode(), layer, submit_pass);
+      return submit_pass;
     }
 
     void addShape(T shape) {
@@ -316,9 +330,10 @@ namespace visage {
       batches_.clear();
     }
 
-    void submit(Layer& layer, int submit_pass) {
+    int submit(Layer& layer, int submit_pass) {
       for (auto& batch : batches_)
-        batch->submit(layer, submit_pass, {});
+        submit_pass = batch->submit(layer, submit_pass, {});
+      return submit_pass;
     }
 
     int autoBatchIndex(const BaseShape& shape, BlendMode blend) const {

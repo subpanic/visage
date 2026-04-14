@@ -29,9 +29,11 @@
 #include "path.h"
 #include "region.h"
 #include "shader.h"
+#include "shader_render_target.h"
 #include "uniforms.h"
 #include "visage_utils/space.h"
 
+#include <cmath>
 #include <bgfx/bgfx.h>
 
 namespace visage {
@@ -65,6 +67,20 @@ namespace visage {
              name == Uniforms::kRadialGradient;
     }
 
+    ShaderRenderTarget::Buffer renderTargetBuffer(ShaderRenderTargetBuffer buffer) {
+      switch (buffer) {
+      case ShaderRenderTargetBuffer::Current:
+        return ShaderRenderTarget::Buffer::Current;
+      case ShaderRenderTargetBuffer::Read:
+        return ShaderRenderTarget::Buffer::Read;
+      case ShaderRenderTargetBuffer::Write:
+        return ShaderRenderTarget::Buffer::Write;
+      }
+
+      VISAGE_ASSERT(false);
+      return ShaderRenderTarget::Buffer::Current;
+    }
+
     void bindCustomShaderTextures(const Shader& shader) {
       int stage = kFirstCustomShaderTextureStage;
       for (const auto& texture : shader.textureBindings()) {
@@ -73,12 +89,19 @@ namespace visage {
           continue;
         }
 
-        if (texture.second.handle == nullptr || !bgfx::isValid(*texture.second.handle))
+        bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
+        if (texture.second.render_target)
+          handle = texture.second.render_target->textureHandle(renderTargetBuffer(
+              texture.second.render_target_buffer));
+        else if (texture.second.handle)
+          handle = *texture.second.handle;
+
+        if (!bgfx::isValid(handle))
           continue;
 
         bgfx::setTexture(stage++,
                          UniformCache::uniformHandle(texture.first.c_str(), UniformCache::Sampler),
-                         *texture.second.handle);
+                         handle);
       }
     }
 
@@ -92,6 +115,28 @@ namespace visage {
         bgfx::setUniform(UniformCache::uniformHandle(uniform.first.c_str()), uniform.second.data);
       }
     }
+
+    void setupQuadVertices(ShapeVertex* vertices, float width, float height) {
+      setCornerCoordinates(vertices);
+      for (int i = 0; i < kVerticesPerQuad; ++i) {
+        vertices[i].dimension_x = width;
+        vertices[i].dimension_y = height;
+        vertices[i].clamp_left = 0.0f;
+        vertices[i].clamp_top = 0.0f;
+        vertices[i].clamp_right = width;
+        vertices[i].clamp_bottom = height;
+      }
+
+      vertices[0].x = 0.0f;
+      vertices[0].y = 0.0f;
+      vertices[1].x = width;
+      vertices[1].y = 0.0f;
+      vertices[2].x = 0.0f;
+      vertices[2].y = height;
+      vertices[3].x = width;
+      vertices[3].y = height;
+    }
+
   }
 
   static constexpr uint64_t blendModeValue(BlendMode blend_mode) {
@@ -176,6 +221,28 @@ namespace visage {
 
   void setOriginFlipUniform(bool origin_flip) {
     setUniform<Uniforms::kOriginFlip>(origin_flip ? -1.0 : 1.0, origin_flip ? 1.0 : 0.0);
+  }
+
+  namespace {
+    void submitShaderPass(const Shader& shader, int width, int height, float time, bool hdr,
+                          bool origin_flip, bgfx::TextureHandle gradient_texture, int submit_pass) {
+      ShapeVertex* vertices = initQuadVertices<ShapeVertex>(1);
+      if (vertices == nullptr)
+        return;
+
+      setupQuadVertices(vertices, width, height);
+      setUniform<Uniforms::kRadialGradient>(0.0f);
+      setBlendMode(shader.state());
+      setTimeUniform(time);
+      setUniformDimensions(width, height);
+      setTexture<Uniforms::kGradient>(0, gradient_texture);
+      setColorMult(hdr);
+      setOriginFlipUniform(origin_flip);
+      bindCustomShaderTextures(shader);
+      bindCustomShaderUniforms(shader);
+      bgfx::submit(submit_pass,
+                   ProgramCache::programHandle(shader.vertexShader(), shader.fragmentShader()));
+    }
   }
 
   bool initTransientQuadBuffers(int num_quads, const bgfx::VertexLayout& layout,
@@ -431,6 +498,75 @@ namespace visage {
     bindCustomShaderUniforms(*shader);
     bgfx::submit(submit_pass,
                  ProgramCache::programHandle(shader->vertexShader(), shader->fragmentShader()));
+  }
+
+  int submitMultiPassShader(const BatchVector<MultiPassShaderWrapper>& batches,
+                            const Layer& layer, int submit_pass) {
+    if (batches.empty() || batches[0].shapes->empty())
+      return submit_pass;
+
+    const MultiPassShaderWrapper& wrapper = batches[0].shapes->front();
+    MultiPassShader* multi_pass_shader = wrapper.shader;
+    if (multi_pass_shader == nullptr || multi_pass_shader->empty())
+      return submit_pass;
+
+    int pass_index = submit_pass + 1;
+    const auto& passes = multi_pass_shader->passes();
+    for (int i = 0; i < static_cast<int>(passes.size()); ++i) {
+      const auto& pass = passes[i];
+      if (pass.shader == nullptr)
+        continue;
+
+      const bool final_pass = i == static_cast<int>(passes.size()) - 1 || pass.output == nullptr;
+      if (final_pass) {
+        auto quads = setupQuads(batches);
+        if (quads.vertices == nullptr)
+          return pass_index;
+
+        bgfx::setViewMode(pass_index, bgfx::ViewMode::Sequential);
+        bgfx::setViewRect(pass_index, 0, 0, layer.width(), layer.height());
+        bgfx::setViewFrameBuffer(pass_index, layer.frameBuffer());
+        bgfx::setViewClear(pass_index, BGFX_CLEAR_NONE);
+        setUniform<Uniforms::kRadialGradient>(quads.radial_gradient ? 1.0f : 0.0f);
+        setBlendMode(pass.shader->state());
+        setTimeUniform(layer.time());
+        setUniformDimensions(layer.width(), layer.height());
+        setTexture<Uniforms::kGradient>(0, layer.gradientAtlas()->colorTextureHandle());
+        setColorMult(layer.hdr());
+        setOriginFlipUniform(layer.bottomLeftOrigin());
+        bindCustomShaderTextures(*pass.shader);
+        bindCustomShaderUniforms(*pass.shader);
+        bgfx::submit(pass_index,
+                     ProgramCache::programHandle(pass.shader->vertexShader(),
+                                                 pass.shader->fragmentShader()));
+        break;
+      }
+      else {
+        ShaderRenderTarget* output = pass.output;
+        output->ensureSize(std::round(wrapper.width), std::round(wrapper.height));
+        if (!output->hasHandle(ShaderRenderTarget::Buffer::Write))
+          continue;
+
+        bgfx::setViewMode(pass_index, bgfx::ViewMode::Sequential);
+        bgfx::setViewRect(pass_index, 0, 0, output->width(), output->height());
+        bgfx::setViewFrameBuffer(pass_index, output->frameBufferHandle(ShaderRenderTarget::Buffer::Write));
+        if (pass.clear_output) {
+          bgfx::setViewClear(pass_index, BGFX_CLEAR_COLOR, pass.clear_color);
+          bgfx::touch(pass_index);
+        }
+        else
+          bgfx::setViewClear(pass_index, BGFX_CLEAR_NONE);
+
+        submitShaderPass(*pass.shader, output->width(), output->height(), layer.time(),
+                         layer.hdr(), layer.bottomLeftOrigin(),
+                         layer.gradientAtlas()->colorTextureHandle(), pass_index);
+        if (pass.swap_output)
+          output->swap();
+        pass_index++;
+      }
+    }
+
+    return pass_index;
   }
 
   void submitSampleRegions(const BatchVector<SampleRegion>& batches, const Layer& layer, int submit_pass) {

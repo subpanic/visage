@@ -24,6 +24,7 @@
 #include "font.h"
 #include "graphics_utils.h"
 #include "layer.h"
+#include "multi_pass_shader.h"
 #include "path.h"
 #include "region.h"
 #include "screenshot.h"
@@ -39,7 +40,6 @@
 
 namespace visage {
   class Palette;
-  class Shader;
 
   class Canvas {
   public:
@@ -459,6 +459,13 @@ namespace visage {
     void shader(Shader* shader, const T1& x, const T2& y, const T3& width, const T4& height) {
       addShape(ShaderWrapper(state_.clamp, state_.brush, state_.x + pixels(x), state_.y + pixels(y),
                              pixels(width), pixels(height), shader));
+    }
+
+    template<typename T1, typename T2, typename T3, typename T4>
+    void multiPassShader(MultiPassShader* shader, const T1& x, const T2& y, const T3& width,
+                         const T4& height) {
+      addShape(MultiPassShaderWrapper(state_.clamp, state_.brush, state_.x + pixels(x),
+                                      state_.y + pixels(y), pixels(width), pixels(height), shader));
     }
 
     template<typename T1, typename T2, typename T3, typename T4>

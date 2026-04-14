@@ -40,6 +40,7 @@ namespace visage {
   class PostEffect;
   class Region;
   class Layer;
+  class MultiPassShader;
   class Shader;
 
   static constexpr float kFullThickness = FLT_MAX;
@@ -725,6 +726,16 @@ namespace visage {
     static void setVertexData(Vertex* vertices) { setCornerCoordinates(vertices); }
 
     Shader* shader = nullptr;
+  };
+
+  struct MultiPassShaderWrapper : Shape<> {
+    MultiPassShaderWrapper(const ClampBounds& clamp, const PackedBrush* brush, float x, float y, float width,
+                           float height, MultiPassShader* shader) :
+        Shape(shader, clamp, brush, x, y, width, height), shader(shader) { }
+
+    static void setVertexData(Vertex* vertices) { setCornerCoordinates(vertices); }
+
+    MultiPassShader* shader = nullptr;
   };
 
   struct SampleRegion : Shape<PostEffectVertex> {

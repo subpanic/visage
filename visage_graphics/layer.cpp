@@ -314,11 +314,14 @@ namespace visage {
     std::vector<PositionedBatch> batches;
     std::vector<RegionPosition> done_regions;
 
-    bgfx::setViewMode(submit_pass, bgfx::ViewMode::Sequential);
-    bgfx::setViewRect(submit_pass, 0, 0, width_, height_);
+    auto configure_view = [this](int pass) {
+      bgfx::setViewMode(pass, bgfx::ViewMode::Sequential);
+      bgfx::setViewRect(pass, 0, 0, width_, height_);
+      if (bgfx::isValid(frame_buffer_data_->handle))
+        bgfx::setViewFrameBuffer(pass, frame_buffer_data_->handle);
+    };
 
-    if (bgfx::isValid(frame_buffer_data_->handle))
-      bgfx::setViewFrameBuffer(submit_pass, frame_buffer_data_->handle);
+    configure_view(submit_pass);
 
     if (intermediate_layer_ && backdrop_count == 0)
       clearInvalidRectAreas(submit_pass);
@@ -335,8 +338,12 @@ namespace visage {
         region_position.position++;
       }
 
-      batches.front().batch->submit(*this, submit_pass, batches);
+      const int next_submit_pass = batches.front().batch->submit(*this, submit_pass, batches);
       batches.clear();
+      if (next_submit_pass != submit_pass) {
+        submit_pass = next_submit_pass;
+        configure_view(submit_pass);
+      }
 
       auto done_it = std::partition(region_positions.begin(), region_positions.end(),
                                     [](const RegionPosition& position) { return position.isDone(); });
