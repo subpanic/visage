@@ -81,8 +81,13 @@ namespace visage {
     std::vector<EventTimer*> timers = timers_;
     std::vector<std::function<void()>> callbacks = std::move(callbacks_);
 
-    for (auto timer : timers)
+    for (auto timer : timers) {
+      // Timer callbacks are allowed to stop or destroy other timers. Iterate over
+      // a snapshot, but only dispatch timers that are still registered.
+      if (std::find(timers_.begin(), timers_.end(), timer) == timers_.end())
+        continue;
       timer->checkTimer(current_time);
+    }
 
     for (auto& callback : callbacks)
       callback();
