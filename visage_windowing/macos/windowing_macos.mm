@@ -369,6 +369,26 @@ namespace visage {
   return YES;
 }
 
+- (BOOL)performKeyEquivalent:(NSEvent*)event {
+  bool command = [event modifierFlags] & NSEventModifierFlagCommand;
+  bool q_or_w = [[event charactersIgnoringModifiers] isEqualToString:@"q"] ||
+                [[event charactersIgnoringModifiers] isEqualToString:@"w"];
+  if (self.allow_quit && command && q_or_w) {
+    visage::NativeWindowLookup::instance().closeAll();
+    return YES;
+  }
+
+  int modifiers = [self keyboardModifiers:event];
+  if ((modifiers & visage::kModifierCmd) == 0)
+    return [super performKeyEquivalent:event];
+
+  visage::KeyCode key_code = visage::translateKeyCode([event keyCode]);
+  if (self.visage_window->handleKeyDown(key_code, modifiers, [event isARepeat]))
+    return YES;
+
+  return [super performKeyEquivalent:event];
+}
+
 - (void)keyDown:(NSEvent*)event {
   bool command = [event modifierFlags] & NSEventModifierFlagCommand;
   bool q_or_w = [[event charactersIgnoringModifiers] isEqualToString:@"q"] ||
