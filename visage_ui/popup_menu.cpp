@@ -269,11 +269,12 @@ namespace visage {
     int bottom = y + h;
     int right = x + w;
     if (bottom > height()) {
-      int top = point.y == PopupMenu::kNotSet ? window_bounds.y() : point.y;
-      y = std::max(0, top - h);
+      int top = point.y == PopupMenu::kNotSet ? window_bounds.y() : window_bounds.y() + point.y;
+      const int maxY = std::max(0, static_cast<int>(height()) - h);
+      y = std::max(0, std::min(top - h, maxY));
     }
     if (right > width())
-      x = std::max(0, x - w);
+      x = std::max(0, static_cast<int>(width()) - w);
 
     for (auto& list : lists_) {
       list.resetOpenMenu();
