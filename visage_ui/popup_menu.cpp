@@ -67,7 +67,7 @@ namespace visage {
 
   void PopupList::selectHoveredIndex() {
     if (hover_index_ >= 0 && hover_index_ < options_.size()) {
-      if (options_[hover_index_].hasOptions()) {
+      if (options_[hover_index_].hasOptions() && !options_[hover_index_].selectableHeader()) {
         for (Listener* listener : listeners_)
           listener->subMenuSelected(options_[hover_index_], yForIndex(hover_index_), this);
         menu_open_index_ = hover_index_;
@@ -213,8 +213,16 @@ namespace visage {
       return;
     }
 
-    if (enable_mouse_up_)
+    if (enable_mouse_up_) {
+      setHoverFromPosition(position + Point(0, yPosition()));
+      if (hover_index_ >= 0 && hover_index_ < options_.size() &&
+          options_[hover_index_].hasOptions() && options_[hover_index_].selectableHeader()) {
+        for (Listener* listener : listeners_)
+          listener->optionSelected(options_[hover_index_], this);
+        return;
+      }
       selectFromPosition(position);
+    }
     enable_mouse_up_ = true;
 
     redraw();

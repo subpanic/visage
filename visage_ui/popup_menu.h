@@ -75,6 +75,12 @@ namespace visage {
 
     bool enabled() const { return enabled_; }
 
+    PopupMenu& setSelectableHeader(bool selectable) {
+      selectable_header_ = selectable;
+      return *this;
+    }
+    bool selectableHeader() const { return selectable_header_; }
+
     auto& onSelection() { return on_selection_; }
     auto& onCancel() { return on_cancel_; }
 
@@ -100,6 +106,7 @@ namespace visage {
     bool is_break_ = false;
     bool selected_ = false;
     bool enabled_ = true;
+    bool selectable_header_ = false;
 
     int shortcut_modifiers_ = 0;
     std::string shortcut_character_;
