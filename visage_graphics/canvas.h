@@ -102,6 +102,9 @@ namespace visage {
     double deltaTime() const { return delta_time_; }
     int frameCount() const { return render_frame_; }
 
+    float lastGpuTimeMs() const { return last_gpu_time_ms_; }
+    uint32_t lastNumDrawCalls() const { return last_num_draw_calls_; }
+
     void setBlendMode(BlendMode blend_mode) { state_.blend_mode = blend_mode; }
 
     const Brush& brush() { return state_.set_brush; }
@@ -811,6 +814,8 @@ namespace visage {
     double delta_time_ = 0.0;
     int render_frame_ = 0;
     int last_skipped_frame_ = 0;
+    float last_gpu_time_ms_ = 0.0f;
+    uint32_t last_num_draw_calls_ = 0;
 
     std::vector<State> state_memory_;
     State state_;

@@ -22,6 +22,7 @@
 #pragma once
 
 #include "visage_ui/frame.h"
+#include "visage_utils/draw_metrics.h"
 
 namespace visage {
   class ApplicationEditor;
@@ -64,6 +65,8 @@ namespace visage {
     void setWindowless(int width, int height);
     void removeFromWindow();
     void drawWindow();
+
+    bool getDrawMetrics(DrawMetricsSnapshot& snapshot) const;
 
     bool isFixedAspectRatio() const { return fixed_aspect_ratio_ != 0.0f; }
     void setFixedAspectRatio(bool fixed);

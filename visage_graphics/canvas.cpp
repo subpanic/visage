@@ -97,6 +97,16 @@ namespace visage {
       if (render_frame_ == 0)
         bgfx::frame();
 
+      const bgfx::Stats* stats = bgfx::getStats();
+      if (stats->gpuTimerFreq > 0) {
+        int64_t gpuElapsed = stats->gpuTimeEnd - stats->gpuTimeBegin;
+        last_gpu_time_ms_ = static_cast<float>(gpuElapsed * 1000.0 / stats->gpuTimerFreq);
+      }
+      else {
+        last_gpu_time_ms_ = 0.0f;
+      }
+      last_num_draw_calls_ = stats->numDraw;
+
       render_frame_++;
       FontCache::clearStaleFonts();
       gradient_atlas_.clearStaleGradients();

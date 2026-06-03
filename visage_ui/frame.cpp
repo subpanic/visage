@@ -23,6 +23,11 @@
 
 #include "visage_graphics/theme.h"
 
+#if VISAGE_DRAW_METRICS
+#include "visage_utils/draw_metrics.h"
+#include "visage_utils/type_name.h"
+#endif
+
 namespace visage {
   void Frame::setVisible(bool visible) {
     if (visible_ != visible) {
@@ -352,7 +357,17 @@ namespace visage {
     if (palette_)
       canvas.setPalette(palette_);
 
+#if VISAGE_DRAW_METRICS
+    DrawMetricsCollector::instance().beginFrameDraw(
+        demangleTypeName(typeid(*this).name()), name_);
+#endif
+
     on_draw_.callback(canvas);
+
+#if VISAGE_DRAW_METRICS
+    DrawMetricsCollector::instance().endFrameDraw();
+#endif
+
     if (alpha_transparency_ != 1.0f) {
       canvas.setBlendMode(BlendMode::Mult);
       canvas.setColor(Color(0xffffffff).withAlpha(alpha_transparency_));

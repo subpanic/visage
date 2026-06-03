@@ -27,6 +27,8 @@
 #include "visage_windowing/windowing.h"
 #include "window_event_handler.h"
 
+#include "visage_utils/draw_metrics.h"
+
 namespace visage {
   TopLevelFrame::TopLevelFrame(ApplicationEditor* editor) : editor_(editor) { }
 
@@ -158,8 +160,26 @@ namespace visage {
     if (!initialized())
       init();
 
+#if VISAGE_DRAW_METRICS
+    DrawMetricsCollector::instance().beginFrame();
+#endif
+
     drawStaleChildren();
     canvas_->submit();
+
+#if VISAGE_DRAW_METRICS
+    DrawMetricsCollector::instance().endFrame(canvas_->lastGpuTimeMs(),
+                                               canvas_->lastNumDrawCalls());
+#endif
+  }
+
+  bool ApplicationEditor::getDrawMetrics(DrawMetricsSnapshot& snapshot) const {
+#if VISAGE_DRAW_METRICS
+    return DrawMetricsCollector::instance().getSnapshot(snapshot);
+#else
+    (void)snapshot;
+    return false;
+#endif
   }
 
   void ApplicationEditor::setFixedAspectRatio(bool fixed) {
