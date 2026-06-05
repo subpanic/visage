@@ -17,15 +17,21 @@ vec4 internalTexture2D(BgfxSampler2D _sampler, vec2 _coord) {
 	return _sampler.m_texture.Sample(_sampler.m_sampler, _coord);
 }
 
+vec4 internalTexture2DLod(BgfxSampler2D _sampler, vec2 _coord, float _level) {
+	return _sampler.m_texture.SampleLevel(_sampler.m_sampler, _coord, _level);
+}
+
 #		define SAMPLER2D(_name, _reg) \
 			uniform SamplerState _name ## Sampler : REGISTER(s, _reg); \
 			uniform Texture2D _name ## Texture : REGISTER(t, _reg); \
 			static BgfxSampler2D _name = { _name ## Sampler, _name ## Texture }
 #		define sampler2D BgfxSampler2D
 #		define texture2D(_sampler, _coord) internalTexture2D(_sampler, _coord)
+#		define texture2DLod(_sampler, _coord, _level) internalTexture2DLod(_sampler, _coord, _level)
 #	else
 #		define SAMPLER2D(_name, _reg) uniform sampler2D _name : REGISTER(s, _reg)
 #		define texture2D(_sampler, _coord) tex2D(_sampler, _coord)
+#		define texture2DLod(_sampler, _coord, _level) tex2Dlod(_sampler, vec4( (_coord).xy, 0.0, _level) )
 #	endif // BGFX_SHADER_LANGUAGE_HLSL > 300
 
 float mix(float _a, float _b, float _t) { return lerp(_a, _b, _t); }
@@ -47,6 +53,7 @@ vec4  mod(vec4  _a, vec4  _b) { return _a - _b * floor(_a / _b); }
 
 #	if BGFX_SHADER_LANGUAGE_GLSL >= 130
 #		define texture2D(_sampler, _coord)      texture(_sampler, _coord)
+#		define texture2DLod(_sampler, _coord, _level) textureLod(_sampler, _coord, _level)
 #	endif // BGFX_SHADER_LANGUAGE_GLSL >= 130
 #endif // BGFX_SHADER_LANGUAGE_*
 
