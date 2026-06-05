@@ -22,7 +22,6 @@
 #include "renderer.h"
 
 #include "visage_utils/string_utils.h"
-#include <iostream>
 
 #if VISAGE_WINDOWS
 #ifndef NOMINMAX
@@ -113,7 +112,6 @@ namespace visage {
     if (initialized_)
       return;
 
-    std::cout << "[visage] Renderer::initialize() enter, model_window=" << model_window << " display=" << display << "\n" << std::flush;
     callback_handler_ = std::make_unique<GraphicsCallbackHandler>();
     initialized_ = true;
     startRenderThread();
@@ -172,13 +170,9 @@ namespace visage {
       error_message_ = renderer_name + " is required and not supported on this computer.";
     }
 
-    std::cout << "[visage] Renderer::initialize() calling bgfx::init, resolution="
-              << bgfx_init.resolution.width << "x" << bgfx_init.resolution.height << "\n" << std::flush;
     bgfx::init(bgfx_init);
-    std::cout << "[visage] Renderer::initialize() bgfx::init done\n" << std::flush;
     VISAGE_ASSERT(bgfx::getRendererType() == bgfx_init.type);
     swap_chain_supported_ = bgfx::getCaps()->supported & BGFX_CAPS_SWAP_CHAIN;
-    std::cout << "[visage] Renderer::initialize() exit\n" << std::flush;
   }
 
   void Renderer::resetResolution(int width, int height) {

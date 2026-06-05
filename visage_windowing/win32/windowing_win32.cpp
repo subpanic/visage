@@ -33,7 +33,6 @@
 #include "windowing_win32.h"
 
 #include "visage_utils/events.h"
-#include <iostream>
 #include "visage_utils/file_system.h"
 #include "visage_utils/string_utils.h"
 #include "visage_utils/thread_utils.h"
@@ -1477,7 +1476,6 @@ namespace visage {
   WindowWin32::WindowWin32(int width, int height, void* parent_handle) : Window(width, height) {
     static constexpr int kWindowFlags = WS_CHILD;
 
-    std::cout << "[visage] WindowWin32 plugin ctor enter\n" << std::flush;
     DpiAwareness dpi_awareness;
     setDpiScale(dpi_awareness.dpiScale());
 
@@ -1487,32 +1485,25 @@ namespace visage {
 
     parent_handle_ = static_cast<HWND>(parent_handle);
     std::string app_name = VISAGE_APPLICATION_NAME;
-    std::cout << "[visage] WindowWin32 plugin ctor calling CreateWindow\n" << std::flush;
     window_handle_ = CreateWindow(window_class_.lpszClassName,
                                   String::convertToWide(app_name).c_str(), kWindowFlags, 0, 0, width,
                                   height, parent_handle_, nullptr, window_class_.hInstance, nullptr);
     if (window_handle_ == nullptr) {
       VISAGE_LOG("Error creating window");
-      std::cout << "[visage] WindowWin32 plugin ctor CreateWindow FAILED\n" << std::flush;
       return;
     }
-    std::cout << "[visage] WindowWin32 plugin ctor CreateWindow succeeded, hwnd=" << window_handle_ << "\n" << std::flush;
 
     SetWindowLongPtr(window_handle_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
-    std::cout << "[visage] WindowWin32 plugin ctor calling SetWindowLongPtr on parent\n" << std::flush;
     auto parent_proc = SetWindowLongPtr(parent_handle_, GWLP_WNDPROC,
                                         reinterpret_cast<LONG_PTR>(pluginParentWindowProc));
     parent_window_proc_ = reinterpret_cast<WNDPROC>(parent_proc);
-    std::cout << "[visage] WindowWin32 plugin ctor parent_proc=" << parent_proc << "\n" << std::flush;
 
     event_hooks_ = std::make_unique<EventHooks>();
     finishWindowSetup();
-    std::cout << "[visage] WindowWin32 plugin ctor exit\n" << std::flush;
   }
 
   void WindowWin32::finishWindowSetup() {
-    std::cout << "[visage] WindowWin32::finishWindowSetup() enter\n" << std::flush;
     NativeWindowLookup::instance().addWindow(this);
 
     UpdateWindow(window_handle_);
@@ -1520,11 +1511,9 @@ namespace visage {
       RegisterDragDrop(window_handle_, drag_drop_target_);
 
     updateMonitor();
-    std::cout << "[visage] WindowWin32::finishWindowSetup() exit\n" << std::flush;
   }
 
   WindowWin32::~WindowWin32() {
-    std::cout << "[visage] WindowWin32::~WindowWin32() enter\n" << std::flush;
     if (drag_drop_target_) {
       RevokeDragDrop(window_handle_);
       drag_drop_target_->Release();
@@ -1538,7 +1527,6 @@ namespace visage {
     DestroyWindow(window_handle_);
     UnregisterClass(window_class_.lpszClassName, module_handle_);
     OleUninitialize();
-    std::cout << "[visage] WindowWin32::~WindowWin32() exit\n" << std::flush;
   }
 
   void WindowWin32::windowContentsResized(int width, int height) {
@@ -1561,7 +1549,6 @@ namespace visage {
   }
 
   void WindowWin32::show(int show_flag) {
-    std::cout << "[visage] WindowWin32::show() enter\n" << std::flush;
     ShowWindow(window_handle_, show_flag);
     SetFocus(window_handle_);
 
@@ -1570,7 +1557,6 @@ namespace visage {
       v_blank_thread_->start();
     }
     handleWindowShown();
-    std::cout << "[visage] WindowWin32::show() exit\n" << std::flush;
   }
 
   void WindowWin32::show() {

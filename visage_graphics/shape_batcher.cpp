@@ -35,7 +35,6 @@
 
 #include <cmath>
 #include <bgfx/bgfx.h>
-#include <iostream>
 
 namespace visage {
   namespace {
@@ -86,7 +85,6 @@ namespace visage {
       int stage = kFirstCustomShaderTextureStage;
       for (const auto& texture : shader.textureBindings()) {
         if (isReservedShaderBindingName(texture.first)) {
-          std::cout << "[visage] bindCustomShaderTextures reserved name: " << texture.first << "\n" << std::flush;
           VISAGE_ASSERT(false);
           continue;
         }
@@ -110,7 +108,6 @@ namespace visage {
     void bindCustomShaderUniforms(const Shader& shader) {
       for (const auto& uniform : shader.uniforms()) {
         if (isReservedShaderBindingName(uniform.first)) {
-          std::cout << "[visage] bindCustomShaderUniforms reserved name: " << uniform.first << "\n" << std::flush;
           VISAGE_ASSERT(false);
           continue;
         }
