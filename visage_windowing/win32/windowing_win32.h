@@ -29,6 +29,7 @@
 #include "windowing.h"
 
 #include <atomic>
+#include <iostream>
 #include <windows.h>
 
 namespace visage {
@@ -67,6 +68,7 @@ namespace visage {
 
     HWND windowHandle() const { return window_handle_; }
     void* nativeHandle() const override { return window_handle_; }
+    void* initWindow() const override { return nullptr; }
     HWND parentHandle() const { return parent_handle_; }
 
     void windowContentsResized(int width, int height) override;

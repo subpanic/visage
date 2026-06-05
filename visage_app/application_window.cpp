@@ -21,6 +21,8 @@
 
 #include "application_window.h"
 
+#include <iostream>
+
 namespace visage {
   ApplicationWindow::ApplicationWindow() = default;
 
@@ -65,13 +67,17 @@ namespace visage {
   }
 
   void ApplicationWindow::show(void* parent_window) {
+    std::cout << "[visage] ApplicationWindow::show(parent_window) enter\n" << std::flush;
     VISAGE_ASSERT(width() && height());
     show(Dimension::nativePixels(nativeWidth()), Dimension::nativePixels(nativeHeight()), parent_window);
   }
 
   void ApplicationWindow::show(const Dimension& width, const Dimension& height, void* parent_window) {
+    std::cout << "[visage] ApplicationWindow::show(w,h,parent) enter\n" << std::flush;
     removeFromWindow();
+    std::cout << "[visage] ApplicationWindow::show(w,h,parent) calling createPluginWindow\n" << std::flush;
     window_ = createPluginWindow(width, height, parent_window);
+    std::cout << "[visage] ApplicationWindow::show(w,h,parent) createPluginWindow done\n" << std::flush;
     showWindow(false);
   }
 
@@ -116,14 +122,18 @@ namespace visage {
   }
 
   void ApplicationWindow::showWindow(bool maximized) {
+    std::cout << "[visage] ApplicationWindow::showWindow() enter\n" << std::flush;
     if (!title_.empty())
       window_->setWindowTitle(title_);
     window_->setAlwaysOnTop(always_on_top_);
 
+    std::cout << "[visage] ApplicationWindow::showWindow() calling addToWindow\n" << std::flush;
     addToWindow(window_.get());
+    std::cout << "[visage] ApplicationWindow::showWindow() addToWindow done\n" << std::flush;
     if (maximized)
       window_->showMaximized();
     else
       window_->show();
+    std::cout << "[visage] ApplicationWindow::showWindow() exit\n" << std::flush;
   }
 }

@@ -22,6 +22,14 @@
 #include "renderer.h"
 
 #include "visage_utils/string_utils.h"
+#include <iostream>
+
+#if VISAGE_WINDOWS
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
@@ -105,6 +113,7 @@ namespace visage {
     if (initialized_)
       return;
 
+    std::cout << "[visage] Renderer::initialize() enter, model_window=" << model_window << " display=" << display << "\n" << std::flush;
     callback_handler_ = std::make_unique<GraphicsCallbackHandler>();
     initialized_ = true;
     startRenderThread();
@@ -142,6 +151,18 @@ namespace visage {
 
     bgfx_init.resolution.reset = resetFlags();
 
+#if VISAGE_WINDOWS
+    if (model_window) {
+      RECT rect = {};
+      if (GetClientRect(static_cast<HWND>(model_window), &rect)) {
+        LONG w = rect.right - rect.left;
+        LONG h = rect.bottom - rect.top;
+        bgfx_init.resolution.width = w > 0 ? static_cast<uint32_t>(w) : 1u;
+        bgfx_init.resolution.height = h > 0 ? static_cast<uint32_t>(h) : 1u;
+      }
+    }
+#endif
+
     for (int i = 0; i < num_supported && !supported_; ++i)
       supported_ = supported_renderers[i] == bgfx_init.type;
 
@@ -151,9 +172,13 @@ namespace visage {
       error_message_ = renderer_name + " is required and not supported on this computer.";
     }
 
+    std::cout << "[visage] Renderer::initialize() calling bgfx::init, resolution="
+              << bgfx_init.resolution.width << "x" << bgfx_init.resolution.height << "\n" << std::flush;
     bgfx::init(bgfx_init);
+    std::cout << "[visage] Renderer::initialize() bgfx::init done\n" << std::flush;
     VISAGE_ASSERT(bgfx::getRendererType() == bgfx_init.type);
     swap_chain_supported_ = bgfx::getCaps()->supported & BGFX_CAPS_SWAP_CHAIN;
+    std::cout << "[visage] Renderer::initialize() exit\n" << std::flush;
   }
 
   void Renderer::resetResolution(int width, int height) {

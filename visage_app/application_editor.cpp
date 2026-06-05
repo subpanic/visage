@@ -22,6 +22,7 @@
 #include "application_editor.h"
 
 #include "client_window_decoration.h"
+#include <iostream>
 #include "visage_graphics/canvas.h"
 #include "visage_graphics/renderer.h"
 #include "visage_windowing/windowing.h"
@@ -114,9 +115,12 @@ namespace visage {
   }
 
   void ApplicationEditor::addToWindow(Window* window) {
+    std::cout << "[visage] ApplicationEditor::addToWindow() enter\n" << std::flush;
     window_ = window;
 
+    std::cout << "[visage] ApplicationEditor::addToWindow() calling Renderer::initialize\n" << std::flush;
     Renderer::instance().initialize(window_->initWindow(), window->globalDisplay());
+    std::cout << "[visage] ApplicationEditor::addToWindow() Renderer::initialize done\n" << std::flush;
     canvas_->pairToWindow(window_->nativeHandle(), window->clientWidth(), window->clientHeight());
     top_level_->setDpiScale(window_->dpiScale());
     top_level_->setNativeBounds(0, 0, window->clientWidth(), window->clientHeight());
@@ -131,9 +135,13 @@ namespace visage {
       drawWindow();
     });
 
+    std::cout << "[visage] ApplicationEditor::addToWindow() calling drawWindow\n" << std::flush;
     drawWindow();
+    std::cout << "[visage] ApplicationEditor::addToWindow() first drawWindow done\n" << std::flush;
     drawWindow();
+    std::cout << "[visage] ApplicationEditor::addToWindow() second drawWindow done\n" << std::flush;
     redraw();
+    std::cout << "[visage] ApplicationEditor::addToWindow() exit\n" << std::flush;
   }
 
   void ApplicationEditor::setWindowless(int width, int height) {
@@ -151,14 +159,24 @@ namespace visage {
   }
 
   void ApplicationEditor::drawWindow() {
-    if (window_ && !window_->isVisible())
+    static int draw_count = 0;
+    ++draw_count;
+    std::cout << "[visage] ApplicationEditor::drawWindow() enter count=" << draw_count << "\n" << std::flush;
+    if (window_ && !window_->isVisible()) {
+      std::cout << "[visage] ApplicationEditor::drawWindow() window not visible, returning\n" << std::flush;
       return;
+    }
 
-    if (width() == 0 || height() == 0)
+    if (width() == 0 || height() == 0) {
+      std::cout << "[visage] ApplicationEditor::drawWindow() zero size, returning\n" << std::flush;
       return;
+    }
 
-    if (!initialized())
+    if (!initialized()) {
+      std::cout << "[visage] ApplicationEditor::drawWindow() calling init()\n" << std::flush;
       init();
+      std::cout << "[visage] ApplicationEditor::drawWindow() init() done\n" << std::flush;
+    }
 
 #if VISAGE_DRAW_METRICS
     DrawMetricsCollector::instance().beginFrame();
@@ -171,6 +189,7 @@ namespace visage {
     DrawMetricsCollector::instance().endFrame(canvas_->lastGpuTimeMs(),
                                                canvas_->lastNumDrawCalls());
 #endif
+    std::cout << "[visage] ApplicationEditor::drawWindow() exit count=" << draw_count << "\n" << std::flush;
   }
 
   bool ApplicationEditor::getDrawMetrics(DrawMetricsSnapshot& snapshot) const {
