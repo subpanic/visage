@@ -11,6 +11,9 @@ endif ()
 
 project(visage VERSION 0.1.0)
 
+# Ensure PIC when visage is built as a subdirectory (needed for Linux plugin shared libraries)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 if (APPLE)
   enable_language(OBJC)
   enable_language(OBJCXX)
