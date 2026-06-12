@@ -37,6 +37,7 @@ namespace visage {
   VISAGE_SET_PROGRAM(Fill, shaders::vs_color, shaders::fs_color)
   VISAGE_SET_PROGRAM(Rectangle, shaders::vs_shape, shaders::fs_rectangle)
   VISAGE_SET_PROGRAM(RoundedRectangle, shaders::vs_shape, shaders::fs_rounded_rectangle)
+  VISAGE_SET_PROGRAM(RoundedRectangle4, shaders::vs_complex_shape, shaders::fs_rounded_rectangle_4)
   VISAGE_SET_PROGRAM(Circle, shaders::vs_shape, shaders::fs_circle)
   VISAGE_SET_PROGRAM(Squircle, shaders::vs_shape, shaders::fs_squircle)
   VISAGE_SET_PROGRAM(FlatArc, shaders::vs_arc, shaders::fs_flat_arc)

@@ -72,6 +72,17 @@ namespace visage {
     }
   };
 
+  struct Rounding {
+    float top_left = 0.0f;
+    float top_right = 0.0f;
+    float bottom_left = 0.0f;
+    float bottom_right = 0.0f;
+
+    Rounding operator*(float scale) const {
+      return { top_left * scale, top_right * scale, bottom_left * scale, bottom_right * scale };
+    }
+  };
+
   template<typename T>
   struct DrawBatch {
     DrawBatch(const std::vector<T>* shapes, std::vector<IBounds>* invalid_rects, int x, int y) :
@@ -228,6 +239,31 @@ namespace visage {
     }
 
     float rounding = 0.0f;
+  };
+
+  struct RoundedRectangle4 : Primitive<ComplexShapeVertex> {
+    VISAGE_CREATE_BATCH_ID
+    static const EmbeddedFile& vertexShader();
+    static const EmbeddedFile& fragmentShader();
+
+    RoundedRectangle4(const ClampBounds& clamp, const PackedBrush* brush, float x, float y,
+                      float width, float height, const Rounding& rounding,
+                      float pixel_width = 1.0f) :
+        Primitive(batchId(), clamp, brush, x, y, width, height), rounding(rounding) {
+      this->pixel_width = pixel_width;
+    }
+
+    void setVertexData(Vertex* vertices) const {
+      setPrimitiveData(vertices);
+      for (int v = 0; v < kVerticesPerQuad; ++v) {
+        vertices[v].value1 = rounding.top_left;
+        vertices[v].value2 = rounding.top_right;
+        vertices[v].value3 = rounding.bottom_left;
+        vertices[v].value4 = rounding.bottom_right;
+      }
+    }
+
+    Rounding rounding;
   };
 
   struct Circle : Primitive<> {

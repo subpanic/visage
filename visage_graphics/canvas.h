@@ -261,6 +261,15 @@ namespace visage {
     }
 
     template<typename T1, typename T2, typename T3, typename T4>
+    void roundedRectangle(const T1& x, const T2& y, const T3& width, const T4& height,
+                          const Rounding& rounding) {
+      addShape(RoundedRectangle4(state_.clamp, state_.brush, state_.x + pixels(x),
+                                 state_.y + pixels(y), pixels(width), pixels(height),
+                                 Rounding{ pixels(rounding.top_left), pixels(rounding.top_right),
+                                           pixels(rounding.bottom_left), pixels(rounding.bottom_right) }));
+    }
+
+    template<typename T1, typename T2, typename T3, typename T4>
     void diamond(const T1& x, const T2& y, const T3& width, const T4& rounding) {
       float w = pixels(width);
       addShape(Diamond(state_.clamp, state_.brush, state_.x + pixels(x), state_.y + pixels(y), w, w,

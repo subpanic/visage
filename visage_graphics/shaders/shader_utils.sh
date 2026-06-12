@@ -223,6 +223,25 @@ float roundedBoxShadow(vec2 coordinates, vec2 dimensions, float sigma, float cor
   return value;
 }
 
+float sdRoundedRectangle4(vec2 position, vec2 rectangle, vec4 radii) {
+  float max_r = min(rectangle.x, rectangle.y);
+  radii = clamp(radii, 0.0, vec4_splat(max_r));
+
+  float r;
+  if (position.x < 0.0 && position.y < 0.0) r = radii.x;
+  else if (position.x >= 0.0 && position.y < 0.0) r = radii.y;
+  else if (position.x < 0.0 && position.y >= 0.0) r = radii.z;
+  else r = radii.w;
+
+  vec2 offset = abs(position) - rectangle + r;
+  return min(max(offset.x, offset.y), 0.0) + length(max(offset, 0.0)) - r;
+}
+
+float roundedRectangle4(vec2 coordinates, vec2 dimensions, vec4 radii, float thickness, float fade) {
+  float distance = sdRoundedRectangle4(coordinates * dimensions, dimensions, radii);
+  return border(distance, thickness + 1.0, fade);
+}
+
 float rectangle(vec2 coordinates, vec2 dimensions, float thickness, float fade) {
   float distance = sdRectangle(coordinates * dimensions, dimensions);
   return border(distance, thickness, fade);
