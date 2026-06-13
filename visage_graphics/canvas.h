@@ -314,6 +314,93 @@ namespace visage {
                                 std::max(1.0f, pixels(rounding) + 0.5f * pixel_width), pixel_width));
     }
 
+    // --- Figma-style drop and inner shadows ---
+
+    // Drop shadow for a plain rectangle. Drawn BEFORE the shape fill.
+    template<typename T1, typename T2, typename T3, typename T4>
+    void rectangleDropShadow(const T1& x, const T2& y, const T3& width, const T4& height,
+                             const ShadowParams& shadow) {
+      roundedRectangleDropShadow(x, y, width, height, 0.0f, shadow);
+    }
+
+    // Drop shadow for a uniform-radius rounded rectangle. Drawn BEFORE the shape fill.
+    // The shadow quad is translated by (shadow.x, shadow.y) and expanded by shadow.blur on each side.
+    template<typename T1, typename T2, typename T3, typename T4, typename T5>
+    void roundedRectangleDropShadow(const T1& x, const T2& y, const T3& width, const T4& height,
+                                    const T5& rounding, const ShadowParams& shadow) {
+      float blur = std::max(1.0f, pixels(shadow.blur));
+      float dx = pixels(shadow.x);
+      float dy = pixels(shadow.y);
+      addShape(RoundedRectangleDropShadow(state_.clamp, state_.brush,
+                                          state_.x + pixels(x) + dx - blur,
+                                          state_.y + pixels(y) + dy - blur,
+                                          pixels(width) + 2.0f * blur,
+                                          pixels(height) + 2.0f * blur,
+                                          std::max(0.0f, pixels(rounding)),
+                                          blur));
+    }
+
+    // Drop shadow for a per-corner rounded rectangle. Drawn BEFORE the shape fill.
+    template<typename T1, typename T2, typename T3, typename T4>
+    void roundedRectangle4DropShadow(const T1& x, const T2& y, const T3& width, const T4& height,
+                                     const Rounding& rounding, const ShadowParams& shadow) {
+      float blur = std::max(1.0f, pixels(shadow.blur));
+      float dx = pixels(shadow.x);
+      float dy = pixels(shadow.y);
+      addShape(RoundedRectangle4DropShadow(state_.clamp, state_.brush,
+                                            state_.x + pixels(x) + dx - blur,
+                                            state_.y + pixels(y) + dy - blur,
+                                            pixels(width) + 2.0f * blur,
+                                            pixels(height) + 2.0f * blur,
+                                            Rounding{ pixels(rounding.top_left),
+                                                      pixels(rounding.top_right),
+                                                      pixels(rounding.bottom_left),
+                                                      pixels(rounding.bottom_right) },
+                                            blur));
+    }
+
+    // Inner shadow for a plain rectangle. Drawn AFTER the shape fill.
+    template<typename T1, typename T2, typename T3, typename T4>
+    void rectangleInnerShadow(const T1& x, const T2& y, const T3& width, const T4& height,
+                              const ShadowParams& shadow) {
+      roundedRectangleInnerShadow(x, y, width, height, 0.0f, shadow);
+    }
+
+    // Inner shadow for a uniform-radius rounded rectangle. Drawn AFTER the shape fill.
+    template<typename T1, typename T2, typename T3, typename T4, typename T5>
+    void roundedRectangleInnerShadow(const T1& x, const T2& y, const T3& width, const T4& height,
+                                     const T5& rounding, const ShadowParams& shadow) {
+      float blur = std::max(1.0f, pixels(shadow.blur));
+      addShape(RoundedRectangleInnerShadow(state_.clamp, state_.brush,
+                                           state_.x + pixels(x),
+                                           state_.y + pixels(y),
+                                           pixels(width),
+                                           pixels(height),
+                                           std::max(0.0f, pixels(rounding)),
+                                           blur,
+                                           pixels(shadow.x),
+                                           pixels(shadow.y)));
+    }
+
+    // Inner shadow for a per-corner rounded rectangle. Drawn AFTER the shape fill.
+    template<typename T1, typename T2, typename T3, typename T4>
+    void roundedRectangle4InnerShadow(const T1& x, const T2& y, const T3& width, const T4& height,
+                                      const Rounding& rounding, const ShadowParams& shadow) {
+      float blur = std::max(1.0f, pixels(shadow.blur));
+      addShape(RoundedRectangle4InnerShadow(state_.clamp, state_.brush,
+                                             state_.x + pixels(x),
+                                             state_.y + pixels(y),
+                                             pixels(width),
+                                             pixels(height),
+                                             Rounding{ pixels(rounding.top_left),
+                                                       pixels(rounding.top_right),
+                                                       pixels(rounding.bottom_left),
+                                                       pixels(rounding.bottom_right) },
+                                             blur,
+                                             pixels(shadow.x),
+                                             pixels(shadow.y)));
+    }
+
     template<typename T1, typename T2, typename T3, typename T4, typename T5, typename T6>
     void roundedRectangleBorder(const T1& x, const T2& y, const T3& width, const T4& height,
                                 const T5& rounding, const T6& thickness) {

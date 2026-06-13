@@ -83,6 +83,12 @@ namespace visage {
     }
   };
 
+  struct ShadowParams {
+    float x = 0.0f;    // horizontal offset (design units / points)
+    float y = 0.0f;    // vertical offset (design units / points)
+    float blur = 0.0f; // blur radius (design units / points)
+  };
+
   template<typename T>
   struct DrawBatch {
     DrawBatch(const std::vector<T>* shapes, std::vector<IBounds>* invalid_rects, int x, int y) :
@@ -264,6 +270,121 @@ namespace visage {
     }
 
     Rounding rounding;
+  };
+
+  // Drop shadow for a uniform-radius rounded rectangle (or plain rect when rounding=0).
+  // The shadow quad must be pre-expanded and pre-offset by the caller (canvas API handles this).
+  // pixel_width (fade) = blur sigma in device pixels.
+  // value1 = rounding in device pixels (doubled in the fragment shader, matching RoundedRectangle convention).
+  struct RoundedRectangleDropShadow : Primitive<> {
+    VISAGE_CREATE_BATCH_ID
+    static const EmbeddedFile& vertexShader();
+    static const EmbeddedFile& fragmentShader();
+
+    RoundedRectangleDropShadow(const ClampBounds& clamp, const PackedBrush* brush,
+                               float x, float y, float width, float height,
+                               float rounding, float blur) :
+        Primitive(batchId(), clamp, brush, x, y, width, height), rounding(rounding) {
+      pixel_width = blur;
+    }
+
+    void setVertexData(Vertex* vertices) const {
+      setPrimitiveData(vertices);
+      for (int v = 0; v < kVerticesPerQuad; ++v)
+        vertices[v].value1 = rounding;
+    }
+
+    float rounding = 0.0f;
+  };
+
+  // Inner shadow for a uniform-radius rounded rectangle (or plain rect when rounding=0).
+  // pixel_width (fade) = blur. value1 = rounding. value2 = dx. value3 = dy.
+  // dx/dy are in device pixels; the fragment shader doubles them for p-space.
+  struct RoundedRectangleInnerShadow : Primitive<ComplexShapeVertex> {
+    VISAGE_CREATE_BATCH_ID
+    static const EmbeddedFile& vertexShader();
+    static const EmbeddedFile& fragmentShader();
+
+    RoundedRectangleInnerShadow(const ClampBounds& clamp, const PackedBrush* brush,
+                                float x, float y, float width, float height,
+                                float rounding, float blur, float dx, float dy) :
+        Primitive(batchId(), clamp, brush, x, y, width, height),
+        rounding(rounding), dx(dx), dy(dy) {
+      pixel_width = blur;
+    }
+
+    void setVertexData(Vertex* vertices) const {
+      setPrimitiveData(vertices);
+      for (int v = 0; v < kVerticesPerQuad; ++v) {
+        vertices[v].value1 = rounding;
+        vertices[v].value2 = dx;
+        vertices[v].value3 = dy;
+      }
+    }
+
+    float rounding = 0.0f;
+    float dx = 0.0f;
+    float dy = 0.0f;
+  };
+
+  // Drop shadow for a per-corner rounded rectangle.
+  // pixel_width (fade) = blur. value1-4 = per-corner radii (no doubling, matching RoundedRectangle4).
+  struct RoundedRectangle4DropShadow : Primitive<ComplexShapeVertex> {
+    VISAGE_CREATE_BATCH_ID
+    static const EmbeddedFile& vertexShader();
+    static const EmbeddedFile& fragmentShader();
+
+    RoundedRectangle4DropShadow(const ClampBounds& clamp, const PackedBrush* brush,
+                                float x, float y, float width, float height,
+                                const Rounding& rounding, float blur) :
+        Primitive(batchId(), clamp, brush, x, y, width, height), rounding(rounding) {
+      pixel_width = blur;
+    }
+
+    void setVertexData(Vertex* vertices) const {
+      setPrimitiveData(vertices);
+      for (int v = 0; v < kVerticesPerQuad; ++v) {
+        vertices[v].value1 = rounding.top_left;
+        vertices[v].value2 = rounding.top_right;
+        vertices[v].value3 = rounding.bottom_left;
+        vertices[v].value4 = rounding.bottom_right;
+      }
+    }
+
+    Rounding rounding;
+  };
+
+  // Inner shadow for a per-corner rounded rectangle.
+  // pixel_width (fade) = blur. value1-4 = radii. value5 = dx. value6 = dy.
+  // dx/dy are in device pixels; the fragment shader doubles them for p-space.
+  struct RoundedRectangle4InnerShadow : Primitive<ComplexShapeVertex> {
+    VISAGE_CREATE_BATCH_ID
+    static const EmbeddedFile& vertexShader();
+    static const EmbeddedFile& fragmentShader();
+
+    RoundedRectangle4InnerShadow(const ClampBounds& clamp, const PackedBrush* brush,
+                                 float x, float y, float width, float height,
+                                 const Rounding& rounding, float blur, float dx, float dy) :
+        Primitive(batchId(), clamp, brush, x, y, width, height), rounding(rounding),
+        dx(dx), dy(dy) {
+      pixel_width = blur;
+    }
+
+    void setVertexData(Vertex* vertices) const {
+      setPrimitiveData(vertices);
+      for (int v = 0; v < kVerticesPerQuad; ++v) {
+        vertices[v].value1 = rounding.top_left;
+        vertices[v].value2 = rounding.top_right;
+        vertices[v].value3 = rounding.bottom_left;
+        vertices[v].value4 = rounding.bottom_right;
+        vertices[v].value5 = dx;
+        vertices[v].value6 = dy;
+      }
+    }
+
+    Rounding rounding;
+    float dx = 0.0f;
+    float dy = 0.0f;
   };
 
   struct Circle : Primitive<> {
