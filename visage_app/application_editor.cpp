@@ -151,7 +151,7 @@ namespace visage {
   }
 
   void ApplicationEditor::drawWindow() {
-    if (window_ && !window_->isVisible())
+    if (!window_ || !window_->isVisible())
       return;
 
     if (width() == 0 || height() == 0)

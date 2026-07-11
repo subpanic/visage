@@ -317,6 +317,7 @@ namespace visage {
     auto configure_view = [this](int pass) {
       bgfx::setViewMode(pass, bgfx::ViewMode::Sequential);
       bgfx::setViewRect(pass, 0, 0, width_, height_);
+      bgfx::setViewClear(pass, BGFX_CLEAR_NONE);
       if (bgfx::isValid(frame_buffer_data_->handle))
         bgfx::setViewFrameBuffer(pass, frame_buffer_data_->handle);
     };
