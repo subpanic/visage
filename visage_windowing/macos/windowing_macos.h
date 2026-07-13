@@ -28,37 +28,49 @@
 #include <Cocoa/Cocoa.h>
 #include <MetalKit/MetalKit.h>
 
+// Allow per-plugin-bundle unique Objective-C class names. When two Thicket
+// variants (instrument and FX) are loaded in the same host, fixed global names
+// collide and the Objective-C runtime logs duplicate-class warnings. A
+// consumer may define VISAGE_OBJC_CLASS_PREFIX when compiling this file.
+#ifndef VISAGE_OBJC_CLASS_PREFIX
+#define VISAGE_OBJC_CLASS_PREFIX Visage
+#endif
+
+#define VISAGE_CONCAT2(a, b) a ## b
+#define VISAGE_CONCAT(a, b) VISAGE_CONCAT2(a, b)
+#define VISAGE_CLASS(name) VISAGE_CONCAT(VISAGE_OBJC_CLASS_PREFIX, name)
+
 namespace visage {
   class WindowMac;
 }
 
-@interface VisageDraggingSource : NSObject <NSDraggingSource>
+@interface VISAGE_CLASS(DraggingSource) : NSObject <NSDraggingSource>
 @end
 
-@interface VisageAppViewDelegate : NSObject <MTKViewDelegate>
+@interface VISAGE_CLASS(AppViewDelegate) : NSObject <MTKViewDelegate>
 @property(nonatomic) visage::WindowMac* visage_window;
 @property long long start_microseconds;
 @end
 
-@interface VisageAppView : MTKView <NSDraggingDestination>
+@interface VISAGE_CLASS(AppView) : MTKView <NSDraggingDestination>
 @property(nonatomic) visage::WindowMac* visage_window;
-@property(strong) VisageDraggingSource* drag_source;
+@property(strong) VISAGE_CLASS(DraggingSource)* drag_source;
 @property bool allow_quit;
 @property NSPoint mouse_down_screen_position;
 
 - (instancetype)initWithFrame:(NSRect)frame_rect inWindow:(visage::WindowMac*)window;
 @end
 
-@interface VisageAppWindowDelegate : NSObject <NSWindowDelegate>
+@interface VISAGE_CLASS(AppWindowDelegate) : NSObject <NSWindowDelegate>
 @property(nonatomic) visage::WindowMac* visage_window;
 @property(nonatomic, retain) NSWindow* window_handle;
 @property bool resizing_horizontal;
 @property bool resizing_vertical;
 @end
 
-@interface VisageAppDelegate : NSObject <NSApplicationDelegate>
+@interface VISAGE_CLASS(AppDelegate) : NSObject <NSApplicationDelegate>
 @property(nonatomic, retain) NSWindow* window_handle;
-@property(nonatomic, strong) VisageAppWindowDelegate* window_delegate;
+@property(nonatomic, strong) VISAGE_CLASS(AppWindowDelegate)* window_delegate;
 @property visage::WindowMac* visage_window;
 @end
 
@@ -97,8 +109,8 @@ namespace visage {
     static bool running_event_loop_;
     NSWindow* window_handle_ = nullptr;
     NSView* parent_view_ = nullptr;
-    VisageAppView* view_ = nullptr;
-    VisageAppViewDelegate* view_delegate_ = nullptr;
+    VISAGE_CLASS(AppView)* view_ = nullptr;
+    VISAGE_CLASS(AppViewDelegate)* view_delegate_ = nullptr;
     NSRect last_content_rect_ {};
     Decoration decoration_ = Decoration::Native;
   };
