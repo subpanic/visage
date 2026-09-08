@@ -54,7 +54,22 @@ endif ()
 
 set(VISAGE_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Shared CPM source cache: dependencies (bgfx, freetype) download once here
+# and are reused by all build trees/presets. Override with
+# -DCPM_SOURCE_CACHE=... or the CPM_SOURCE_CACHE env var.
+if (NOT DEFINED CPM_SOURCE_CACHE AND NOT DEFINED ENV{CPM_SOURCE_CACHE})
+  if (WIN32)
+    set(_cpm_cache_default "$ENV{LOCALAPPDATA}/CPM")
+  elseif (UNIX AND NOT APPLE AND DEFINED ENV{XDG_CACHE_HOME})
+    set(_cpm_cache_default "$ENV{XDG_CACHE_HOME}/CPM")
+  else ()
+    set(_cpm_cache_default "$ENV{HOME}/.cache/CPM")
+  endif ()
+  set(CPM_SOURCE_CACHE "${_cpm_cache_default}" CACHE PATH "Shared CPM source cache")
+endif ()
+
 include(FetchContent)
+include(cmake/CPM.cmake)
 include(cmake/compile_flags.cmake)
 include(cmake/testing_framework.cmake)
 

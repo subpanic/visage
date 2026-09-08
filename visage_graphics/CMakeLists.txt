@@ -60,19 +60,17 @@ endif ()
 
 message(STATUS "VISAGE: Downloading graphics dependencies")
 set(CMAKE_MESSAGE_LOG_LEVEL "ERROR")
-FetchContent_Declare(bgfx GIT_REPOSITORY https://github.com/bkaradzic/bgfx.cmake.git
+CPMAddPackage(NAME bgfx GIT_REPOSITORY https://github.com/bkaradzic/bgfx.cmake.git
   GIT_SHALLOW TRUE
   GIT_TAG v1.129.8958-499
   EXCLUDE_FROM_ALL
 )
-FetchContent_MakeAvailable(bgfx)
 
-FetchContent_Declare(freetype GIT_REPOSITORY https://gitlab.freedesktop.org/freetype/freetype.git
+CPMAddPackage(NAME freetype GIT_REPOSITORY https://gitlab.freedesktop.org/freetype/freetype.git
   GIT_SHALLOW TRUE
   GIT_TAG VER-2-14-1
   EXCLUDE_FROM_ALL
 )
-FetchContent_MakeAvailable(freetype)
 set(CMAKE_MESSAGE_LOG_LEVEL "NOTICE")
 
 if (MSVC)
