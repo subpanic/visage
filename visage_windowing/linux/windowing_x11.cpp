@@ -632,7 +632,9 @@ namespace visage {
     timer_thread_running_ = true;
     timer_thread_ = std::make_unique<std::thread>(threadTimerCallback, this);
     start_draw_microseconds_ = time::microseconds();
-    setDpiScale(monitor_info_.dpi / kDefaultDpi);
+    // Embedded plugin windows are always physical pixels: hosts negotiate plugin sizes in
+    // physical pixels and X11 has no per-window DPI, so ignore the monitor-derived scale here.
+    setDpiScale(1.0f);
     NativeWindowLookup::instance().addWindow(this);
   }
 
