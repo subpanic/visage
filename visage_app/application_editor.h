@@ -64,6 +64,7 @@ namespace visage {
     void addToWindow(Window* window);
     void setWindowless(int width, int height);
     void removeFromWindow();
+    void refreshWindowFrameBuffer();
     void drawWindow();
 
     bool getDrawMetrics(DrawMetricsSnapshot& snapshot) const;

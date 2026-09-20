@@ -67,6 +67,11 @@ namespace visage {
       return event_handler_->handleWindowHidden();
   }
 
+  void Window::notifyWindowMapped() {
+    if (event_handler_)
+      event_handler_->handleWindowMapped();
+  }
+
   bool Window::handleCloseRequested() {
     if (event_handler_)
       return event_handler_->handleCloseRequested();

@@ -74,6 +74,7 @@ namespace visage {
 
     void handleWindowShown() override;
     void handleWindowHidden() override;
+    void handleWindowMapped() override;
     bool handleCloseRequested() override;
 
     bool handleFileDrag(int x, int y, const std::vector<std::string>& files) override;

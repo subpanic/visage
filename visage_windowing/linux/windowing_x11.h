@@ -284,6 +284,7 @@ namespace visage {
     MonitorInfo monitor_info_;
     ::Window window_handle_ = 0;
     ::Window parent_handle_ = 0;
+    bool parent_configure_recreate_pending_ = false;
     std::map<KeySym, bool> pressed_;
     long long start_microseconds_ = 0;
     std::atomic<long long> timer_microseconds_ = 16667;

@@ -629,6 +629,8 @@ namespace visage {
     XSelectInput(display, window_handle_, kEventMask);
     XFlush(display);
 
+    parent_configure_recreate_pending_ = true;
+
     timer_thread_running_ = true;
     timer_thread_ = std::make_unique<std::thread>(threadTimerCallback, this);
     start_draw_microseconds_ = time::microseconds();
@@ -1100,6 +1102,13 @@ namespace visage {
         XWindowAttributes attributes;
         XGetWindowAttributes(x11_->display(), parent_handle_, &attributes);
         setNativeWindowSize(attributes.width, attributes.height);
+        if (parent_configure_recreate_pending_) {
+          parent_configure_recreate_pending_ = false;
+          notifyWindowMapped();
+        }
+      }
+      else if (event.xany.window == window_handle_ && event.type == MapNotify) {
+        notifyWindowMapped();
       }
       else if (event.xany.window == window_handle_ && event.type == ClientMessage &&
                event.xclient.message_type == x11_->timerEvent()) {

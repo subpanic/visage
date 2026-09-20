@@ -78,6 +78,7 @@ namespace visage {
 
       virtual void handleWindowShown() = 0;
       virtual void handleWindowHidden() = 0;
+      virtual void handleWindowMapped() { }
       virtual bool handleCloseRequested() = 0;
 
       virtual bool handleFileDrag(int x, int y, const std::vector<std::string>& files) = 0;
@@ -153,6 +154,7 @@ namespace visage {
     int clientHeight() const { return client_height_; }
     void setEventHandler(EventHandler* event_handler) { event_handler_ = event_handler; }
     void clearEventHandler() { event_handler_ = nullptr; }
+    void notifyWindowMapped();
 
     bool hasActiveTextEntry() const;
 

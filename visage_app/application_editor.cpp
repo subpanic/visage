@@ -150,6 +150,11 @@ namespace visage {
     canvas_->removeFromWindow();
   }
 
+  void ApplicationEditor::refreshWindowFrameBuffer() {
+    if (canvas_)
+      canvas_->refreshWindowFrameBuffer();
+  }
+
   void ApplicationEditor::drawWindow() {
     if (!window_ || !window_->isVisible())
       return;

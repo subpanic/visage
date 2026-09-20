@@ -94,6 +94,10 @@ namespace visage {
     editor_->onShow().callback();
   }
 
+  void WindowEventHandler::handleWindowMapped() {
+    editor_->refreshWindowFrameBuffer();
+  }
+
   void WindowEventHandler::handleWindowHidden() {
     editor_->onHide().callback();
   }
