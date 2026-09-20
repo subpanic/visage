@@ -133,6 +133,11 @@ namespace visage {
     void setDpiScale(float scale) { dpi_scale_ = scale; }
     float dpiScale() const { return dpi_scale_; }
 
+    // Explicit dpi scale override (e.g. from a host-provided content scale factor).
+    // When > 0, platform resize/dpi handlers use it instead of querying the OS.
+    void setDpiScaleOverride(float scale) { dpi_scale_override_ = scale; }
+    float dpiScaleOverride() const { return dpi_scale_override_; }
+
     IPoint convertToNative(const Point& logical_point) const {
       return { static_cast<int>(std::round(logical_point.x * dpi_scale_)),
                static_cast<int>(std::round(logical_point.y * dpi_scale_)) };
@@ -200,6 +205,7 @@ namespace visage {
 
     std::function<void(double)> draw_callback_ = nullptr;
     float dpi_scale_ = 1.0f;
+    float dpi_scale_override_ = 0.0f;
     bool visible_ = true;
     bool mouse_relative_mode_ = false;
     int client_width_ = 0;

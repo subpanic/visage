@@ -307,6 +307,27 @@ namespace visage {
 
   class DpiAwareness {
   public:
+    // The plugin shares the host's process, so the process DPI awareness reflects the
+    // host. Our windows must use a matching awareness context: a per-monitor window
+    // inside a DPI-unaware host gets its coordinates and presentation scaled by the
+    // OS in incompatible ways, while a matching context keeps every coordinate space
+    // consistent (and makes GetDpiFor* report the values the host actually uses).
+    static bool processDpiUnaware() {
+      static const bool unaware = [] {
+        HMODULE shcore = LoadLibraryA("shcore.dll");
+        if (shcore == nullptr)
+          return false;
+        typedef HRESULT(WINAPI* GetProcessDpiAwareness_t)(HANDLE, int*);
+        auto get_awareness = reinterpret_cast<GetProcessDpiAwareness_t>(
+            GetProcAddress(shcore, "GetProcessDpiAwareness"));
+        if (get_awareness == nullptr)
+          return false;
+        int awareness = 0;  // PROCESS_DPI_UNAWARE
+        return SUCCEEDED(get_awareness(GetCurrentProcess(), &awareness)) && awareness == 0;
+      }();
+      return unaware;
+    }
+
     DpiAwareness() {
       HMODULE user32 = LoadLibraryA("user32.dll");
       if (user32 == nullptr)
@@ -325,6 +346,8 @@ namespace visage {
 
       previous_dpi_awareness_ = threadDpiAwarenessContext_();
       dpi_awareness_ = DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
+      if (processDpiUnaware())
+        dpi_awareness_ = DPI_AWARENESS_CONTEXT_UNAWARE;
       if (!setThreadDpiAwarenessContext_(dpi_awareness_)) {
         dpi_awareness_ = DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE;
         setThreadDpiAwarenessContext_(dpi_awareness_);
@@ -1477,7 +1500,6 @@ namespace visage {
     static constexpr int kWindowFlags = WS_CHILD;
 
     DpiAwareness dpi_awareness;
-    setDpiScale(dpi_awareness.dpiScale());
 
     registerWindowClass();
     window_class_.lpfnWndProc = windowProcedure;
@@ -1492,6 +1514,11 @@ namespace visage {
       VISAGE_LOG("Error creating window");
       return;
     }
+
+    // Take the dpi scale from our own window: it shares the host's dpi awareness
+    // context (see DpiAwareness), so it reports the scale the host actually uses -
+    // the real monitor dpi for aware hosts, virtualized 96-dpi for unaware ones.
+    setDpiScale(dpi_awareness.dpiScale(window_handle_));
 
     SetWindowLongPtr(window_handle_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
 
@@ -1730,7 +1757,10 @@ namespace visage {
     int height = rect.bottom - rect.top - borders.height();
 
     DpiAwareness dpi_awareness;
-    setDpiScale(dpi_awareness.dpiScale(hwnd));
+    if (dpiScaleOverride() > 0.0f)
+      setDpiScale(dpiScaleOverride());
+    else
+      setDpiScale(dpi_awareness.dpiScale(hwnd));
     handleResized(width, height);
   }
 
@@ -1743,7 +1773,10 @@ namespace visage {
     handleAdjustResize(&width, &height, true, true);
 
     DpiAwareness dpi_awareness;
-    setDpiScale(dpi_awareness.dpiScale(hwnd));
+    if (dpiScaleOverride() > 0.0f)
+      setDpiScale(dpiScaleOverride());
+    else
+      setDpiScale(dpi_awareness.dpiScale(hwnd));
     handleResized(width, height);
     SetWindowPos(hwnd, nullptr, suggested->left, suggested->top, width + borders.width(),
                  height + borders.height(), SWP_NOZORDER | SWP_NOACTIVATE);
