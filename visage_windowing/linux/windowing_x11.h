@@ -258,7 +258,6 @@ namespace visage {
 
     ::Window windowUnderCursor(::Window inside);
     ::Window windowUnderCursor();
-    ::Window dragDropProxy(::Window window) const;
 
     void sendDragDropEnter(::Window source, ::Window target) const;
     void sendDragDropLeave(::Window source, ::Window target) const;
@@ -274,6 +273,11 @@ namespace visage {
     std::vector<std::string> drag_drop_files_;
     int drag_drop_target_x_ = 0;
     int drag_drop_target_y_ = 0;
+    bool drag_drop_files_requested_ = false;
+    bool drag_drop_files_received_ = false;
+    bool drag_drop_pending_ = false;
+    ::Window drag_drop_message_window_ = 0;
+    long drag_drop_source_window_ = 0;
     int hover_window_operation_ = 0;
     int window_operation_ = 0;
     IPoint dragging_window_position_;

@@ -624,6 +624,12 @@ namespace visage {
                     x11_->dndVersion(), 1);
     XChangeProperty(display, parent_handle_, x11_->dndProxy(), XA_WINDOW, 32, PropModeReplace,
                     (unsigned char*)&window_handle_, 1);
+
+    // XDND spec: a window referenced by XdndProxy must carry XdndProxy pointing
+    // at itself, or sources (e.g. Qt) discard the proxy as stale and deliver
+    // to the host's window instead, where the messages never reach us.
+    XChangeProperty(display, window_handle_, x11_->dndProxy(), XA_WINDOW, 32, PropModeReplace,
+                    (unsigned char*)&window_handle_, 1);
     XReparentWindow(display, window_handle_, parent_handle_, 0, 0);
 
     XSelectInput(display, window_handle_, kEventMask);
@@ -981,24 +987,12 @@ namespace visage {
     XFlush(x11_->display());
   }
 
-  ::Window WindowX11::dragDropProxy(::Window window) const {
-    Atom actual_type;
-    int actual_format;
-    unsigned long num_items = 0, bytes_after = 0;
-    unsigned char* proxy_data = nullptr;
-    XGetWindowProperty(x11_->display(), window, x11_->dndProxy(), 0, ~0, False, AnyPropertyType,
-                       &actual_type, &actual_format, &num_items, &bytes_after, &proxy_data);
-    if (proxy_data && num_items * actual_format == 32) {
-      ::Window result = reinterpret_cast<long*>(proxy_data)[0];
-      XFree(proxy_data);
-      return result;
-    }
-    return 0;
-  }
-
   void WindowX11::sendDragDropStatus(::Window source, ::Window target, bool accept_drag) const {
-    ::Window proxy = dragDropProxy(target);
-    ::Window receiver = proxy ? proxy : target;
+    // Per XDND spec, XdndStatus replies go directly to the window that sent
+    // XdndPosition; XdndProxy indirection only applies to the source->target
+    // direction. Looking it up here bounced the reply back to our own window
+    // whenever our embed-time XdndProxy property was present on the source.
+    ::Window receiver = target;
 
     XEvent message { 0 };
     message.xclient.type = ClientMessage;
@@ -1068,8 +1062,8 @@ namespace visage {
   }
 
   void WindowX11::sendDragDropFinished(::Window source, ::Window target, bool accepted_drag) const {
-    ::Window proxy = dragDropProxy(target);
-    ::Window receiver = proxy ? proxy : target;
+    // Same reply routing as sendDragDropStatus: straight to the XdndDrop sender.
+    ::Window receiver = target;
 
     XEvent message;
     memset(&message, 0, sizeof(message));
@@ -1165,17 +1159,32 @@ namespace visage {
       X11Connection::DisplayLock lock(x11_);
       if (event.xclient.message_type == x11_->dndEnter()) {
         drag_drop_files_.clear();
-        XConvertSelection(x11_->display(), x11_->dndSelection(), x11_->dndUriList(),
-                          x11_->dndUriList(), window_handle_, CurrentTime);
-        XFlush(x11_->display());
+        drag_drop_files_requested_ = false;
+        drag_drop_files_received_ = false;
+        drag_drop_pending_ = false;
         sendDragDropStatus(event.xclient.window, event.xclient.data.l[0], false);
       }
       else if (event.xclient.message_type == x11_->dndLeave()) {
+        drag_drop_files_requested_ = false;
+        drag_drop_files_received_ = false;
+        drag_drop_pending_ = false;
         handleFileDragLeave();
       }
       else if (event.xclient.message_type == x11_->dndDrop()) {
-        bool success = handleFileDrop(drag_drop_target_x_, drag_drop_target_y_, drag_drop_files_);
-        sendDragDropFinished(event.xclient.window, event.xclient.data.l[0], success);
+        if (drag_drop_files_received_) {
+          bool success = handleFileDrop(drag_drop_target_x_, drag_drop_target_y_, drag_drop_files_);
+          sendDragDropFinished(event.xclient.window, event.xclient.data.l[0], success);
+        }
+        else {
+          // Data not fetched yet: request it with the timestamp from XdndDrop
+          // (the spec-compliant time) and finish the drop when it arrives.
+          drag_drop_pending_ = true;
+          drag_drop_message_window_ = event.xclient.window;
+          drag_drop_source_window_ = event.xclient.data.l[0];
+          XConvertSelection(x11_->display(), x11_->dndSelection(), x11_->dndUriList(),
+                            x11_->dndUriList(), window_handle_, event.xclient.data.l[2]);
+          XFlush(x11_->display());
+        }
       }
       else if (event.xclient.message_type == x11_->dndPosition()) {
         int win_x = 0;
@@ -1188,6 +1197,17 @@ namespace visage {
         drag_drop_target_y_ = (event.xclient.data.l[2] & 0xffff) - win_y;
         bool accepts = handleFileDrag(drag_drop_target_x_, drag_drop_target_y_, drag_drop_files_);
         sendDragDropStatus(event.xclient.window, event.xclient.data.l[0], accepts);
+
+        // Prefetch the file list using the timestamp the source sent in
+        // XdndPosition. CurrentTime is rejected by strict sources (Qt refuses
+        // any XdndSelection conversion whose time isn't the drag's own
+        // timestamp), which previously left drag_drop_files_ empty forever.
+        if (!drag_drop_files_received_ && !drag_drop_files_requested_) {
+          drag_drop_files_requested_ = true;
+          XConvertSelection(x11_->display(), x11_->dndSelection(), x11_->dndUriList(),
+                            x11_->dndUriList(), window_handle_, event.xclient.data.l[3]);
+          XFlush(x11_->display());
+        }
       }
       else if (event.xclient.message_type == x11_->dndStatus()) {
       }
@@ -1209,7 +1229,38 @@ namespace visage {
       X11Connection::DisplayLock lock(x11_);
 
       if (event.xselection.selection == x11_->dndSelection()) {
+        if (!event.xselection.property) {
+          // Conversion refused; allow a retry with a fresh timestamp.
+          drag_drop_files_requested_ = false;
+        }
+        else {
+          drag_drop_files_received_ = true;
+        }
         if (event.xselection.property) {
+
+          // file:// URIs in XDND uri-lists are percent-encoded (RFC 2396);
+          // decode or paths with spaces/special chars fail to open.
+          static auto percentDecode = [](const std::string& encoded) {
+            auto hexVal = [](char c) -> int {
+              if (c >= '0' && c <= '9') return c - '0';
+              if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+              if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+              return -1;
+            };
+            std::string decoded;
+            decoded.reserve(encoded.size());
+            for (size_t i = 0; i < encoded.size(); ++i) {
+              int hi = i + 2 < encoded.size() ? hexVal(encoded[i + 1]) : -1;
+              int lo = hi >= 0 ? hexVal(encoded[i + 2]) : -1;
+              if (encoded[i] == '%' && hi >= 0 && lo >= 0) {
+                decoded += static_cast<char>(hi * 16 + lo);
+                i += 2;
+              }
+              else
+                decoded += encoded[i];
+            }
+            return decoded;
+          };
           const std::string kFilePrefix = "file://";
 
           Atom actual_type;
@@ -1233,13 +1284,18 @@ namespace visage {
             while (std::getline(stream, line)) {
               std::string trimmed = String(line).trim().toUtf8();
               if (trimmed.substr(0, kFilePrefix.size()) == kFilePrefix)
-                drag_drop_files_.push_back(trimmed.substr(kFilePrefix.size()));
+                drag_drop_files_.push_back(percentDecode(trimmed.substr(kFilePrefix.size())));
               else
                 drag_drop_files_.push_back(trimmed);
             }
 
             XFree(files_string);
           }
+        }
+        if (drag_drop_pending_) {
+          drag_drop_pending_ = false;
+          bool success = handleFileDrop(drag_drop_target_x_, drag_drop_target_y_, drag_drop_files_);
+          sendDragDropFinished(drag_drop_message_window_, drag_drop_source_window_, success);
         }
       }
       break;
