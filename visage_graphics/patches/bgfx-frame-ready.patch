@@ -1,0 +1,34 @@
+--- a/bgfx/include/bgfx/bgfx.h
++++ b/bgfx/include/bgfx/bgfx.h
+@@ -2096,2 +2096,9 @@
+ 	uint32_t frame(bool _capture = false);
+ 
++	/// Query render-buffer availability without waiting or advancing a frame.
++	/// Call only on the API thread. Readiness remains valid until that thread
++	/// calls frame(); it does not guarantee GPU completion or presentation.
++	/// Single-threaded contexts always return true.
++	/// Visage extension; not part of the upstream C API.
++	bool isFrameReady();
++
+--- a/bgfx/src/bgfx.cpp
++++ b/bgfx/src/bgfx.cpp
+@@ -4079,2 +4079,19 @@
+ 
++	bool isFrameReady()
++	{
++		BGFX_CHECK_API_THREAD();
++#if BGFX_CONFIG_MULTITHREADED
++		if (!s_ctx->m_singleThreaded)
++		{
++			if (!s_ctx->m_renderSem.wait(0) )
++			{
++				return false;
++			}
++			// Only the API thread consumes this token. Preserve it for frame().
++			s_ctx->m_renderSem.post();
++		}
++#endif // BGFX_CONFIG_MULTITHREADED
++		return true;
++	}
++
+ 	const Caps* getCaps()

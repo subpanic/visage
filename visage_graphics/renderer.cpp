@@ -175,6 +175,14 @@ namespace visage {
     swap_chain_supported_ = bgfx::getCaps()->supported & BGFX_CAPS_SWAP_CHAIN;
   }
 
+  bool Renderer::frameReady() {
+#if VISAGE_WINDOWS && VISAGE_BACKGROUND_GRAPHICS_THREAD
+    return bgfx::isFrameReady();
+#else
+    return true;
+#endif
+  }
+
   void Renderer::resetResolution(int width, int height) {
 #if VISAGE_MAC
     bgfx::reset(width, height, resetFlags());

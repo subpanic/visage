@@ -162,6 +162,11 @@ namespace visage {
     if (width() == 0 || height() == 0)
       return;
 
+    // Leave dirty regions intact while the previous frame holds the render buffer.
+    // Waiting in bgfx::frame() here also stalls the host's native window move loop.
+    if (!Renderer::frameReady())
+      return;
+
     if (!initialized())
       init();
 

@@ -36,6 +36,7 @@ namespace visage {
     ~Renderer() override;
 
     static void resetResolution(int width, int height);
+    static bool frameReady();
 
     void initializeWindowless() { initialize(windowlessContext(), nullptr); }
     void initialize(void* model_window, void* display);

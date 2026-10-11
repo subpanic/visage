@@ -58,13 +58,35 @@ if (NOT EMSCRIPTEN AND VISAGE_ENABLE_BACKGROUND_GRAPHICS_THREAD)
   target_compile_definitions(VisageGraphics PUBLIC VISAGE_BACKGROUND_GRAPHICS_THREAD=1)
 endif ()
 
+set(_bgfx_patch_options)
+if(WIN32)
+  set(_bgfx_frame_patch "${CMAKE_CURRENT_SOURCE_DIR}/patches/bgfx-frame-ready.patch")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_bgfx_frame_patch}")
+  file(SHA256 "${_bgfx_frame_patch}" _bgfx_frame_hash)
+  set(_bgfx_source_key "v1.129.8958-499-${_bgfx_frame_hash}")
+  set(_bgfx_patch_options
+    PATCHES "${_bgfx_frame_patch}"
+    CUSTOM_CACHE_KEY "${_bgfx_source_key}")
+  if(NOT "${VISAGE_BGFX_SOURCE_KEY}" STREQUAL "${_bgfx_source_key}")
+    # The wrapper caches these paths independently of CPM's patched source key.
+    foreach(_bgfx_source_var BGFX_DIR BX_DIR BIMG_DIR)
+      unset(${_bgfx_source_var} CACHE)
+    endforeach()
+  endif()
+endif()
+
 message(STATUS "VISAGE: Downloading graphics dependencies")
 set(CMAKE_MESSAGE_LOG_LEVEL "ERROR")
 CPMAddPackage(NAME bgfx GIT_REPOSITORY https://github.com/bkaradzic/bgfx.cmake.git
   GIT_SHALLOW TRUE
   GIT_TAG v1.129.8958-499
   EXCLUDE_FROM_ALL
+  ${_bgfx_patch_options}
 )
+if(WIN32)
+  set(VISAGE_BGFX_SOURCE_KEY "${_bgfx_source_key}" CACHE INTERNAL
+      "Selected patched BGFX source" FORCE)
+endif()
 
 CPMAddPackage(NAME freetype GIT_REPOSITORY https://gitlab.freedesktop.org/freetype/freetype.git
   GIT_SHALLOW TRUE
