@@ -61,11 +61,15 @@ endif ()
 set(_bgfx_patch_options)
 if(WIN32)
   set(_bgfx_frame_patch "${CMAKE_CURRENT_SOURCE_DIR}/patches/bgfx-frame-ready.patch")
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_bgfx_frame_patch}")
+  set(_bgfx_copy_patch "${CMAKE_CURRENT_SOURCE_DIR}/patches/bgfx-d3d11-copy-model.patch")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+      "${_bgfx_frame_patch}" "${_bgfx_copy_patch}")
   file(SHA256 "${_bgfx_frame_patch}" _bgfx_frame_hash)
-  set(_bgfx_source_key "v1.129.8958-499-${_bgfx_frame_hash}")
+  file(SHA256 "${_bgfx_copy_patch}" _bgfx_copy_hash)
+  string(SHA256 _bgfx_patch_hash "${_bgfx_frame_hash};${_bgfx_copy_hash}")
+  set(_bgfx_source_key "v1.129.8958-499-${_bgfx_patch_hash}")
   set(_bgfx_patch_options
-    PATCHES "${_bgfx_frame_patch}"
+    PATCHES "${_bgfx_frame_patch}" "${_bgfx_copy_patch}"
     CUSTOM_CACHE_KEY "${_bgfx_source_key}")
   if(NOT "${VISAGE_BGFX_SOURCE_KEY}" STREQUAL "${_bgfx_source_key}")
     # The wrapper caches these paths independently of CPM's patched source key.

@@ -1,0 +1,27 @@
+--- a/bgfx/src/renderer_d3d11.cpp
++++ b/bgfx/src/renderer_d3d11.cpp
+@@ -1025,1 +1025,1 @@
+-						DXGI_SWAP_EFFECT_FLIP_DISCARD
++						DXGI_SWAP_EFFECT_DISCARD
+@@ -1054,4 +1054,1 @@
+-					m_scd.scaling = 0 == g_platformData.ndt
+-						? DXGI_SCALING_NONE
+-						: DXGI_SCALING_STRETCH
+-						;
++					m_scd.scaling = DXGI_SCALING_STRETCH;
+--- a/bgfx/src/dxgi.cpp
++++ b/bgfx/src/dxgi.cpp
+@@ -495,1 +495,5 @@
+-			hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing) );
++			if (_scd.swapEffect == DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL
++			||  _scd.swapEffect == DXGI_SWAP_EFFECT_FLIP_DISCARD)
++			{
++				hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing) );
++			}
+@@ -724,1 +728,5 @@
+-			hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
++			if (_scd.swapEffect == DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL
++			||  _scd.swapEffect == DXGI_SWAP_EFFECT_FLIP_DISCARD)
++			{
++				hr = factory5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
++			}
