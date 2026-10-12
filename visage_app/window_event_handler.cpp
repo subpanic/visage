@@ -81,8 +81,14 @@ namespace visage {
 
   void WindowEventHandler::handleResized(int width, int height) {
     VISAGE_ASSERT(width >= 0 && height >= 0);
+    // DPI changes must reach the frame tree even when client dimensions stay fixed.
+    content_frame_->setDpiScale(window_->dpiScale());
     content_frame_->setNativeBounds(0, 0, width, height);
     content_frame_->redraw();
+  }
+
+  void WindowEventHandler::handleDpiChange(bool beginning) {
+    editor_->onWindowDpiChange().callback(beginning);
   }
 
   void WindowEventHandler::handleAdjustResize(int* width, int* height, bool horizontal_resize,

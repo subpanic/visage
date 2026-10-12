@@ -123,6 +123,8 @@ namespace visage {
     window_->setFixedAspectRatio(fixed_aspect_ratio_ != 0.0f);
 
     window_event_handler_ = std::make_unique<WindowEventHandler>(this, top_level_.get());
+    if (window_->dpiChangePending())
+      on_window_dpi_change_.callback(true);
     checkFixedAspectRatio();
 
     window_->setDrawCallback([this](double time) {
@@ -164,8 +166,9 @@ namespace visage {
 
     // Leave dirty regions intact while the previous frame holds the render buffer.
     // Waiting in bgfx::frame() here also stalls the host's native window move loop.
-    if (!Renderer::frameReady())
+    if (!Renderer::frameReady()) {
       return;
+    }
 
     if (!initialized())
       init();

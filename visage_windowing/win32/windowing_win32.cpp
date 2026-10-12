@@ -47,6 +47,7 @@
 #define WM_VBLANK (WM_USER + 1)
 
 typedef DPI_AWARENESS_CONTEXT(WINAPI* GetWindowDpiAwarenessContext_t)(HWND);
+typedef DPI_AWARENESS(WINAPI* GetAwarenessFromDpiAwarenessContext_t)(DPI_AWARENESS_CONTEXT);
 typedef DPI_AWARENESS_CONTEXT(WINAPI* GetThreadDpiAwarenessContext_t)();
 typedef DPI_AWARENESS_CONTEXT(WINAPI* SetThreadDpiAwarenessContext_t)(DPI_AWARENESS_CONTEXT);
 typedef UINT(WINAPI* GetDpiForWindow_t)(HWND);
@@ -58,6 +59,24 @@ namespace visage {
   static T procedure(HMODULE module, LPCSTR proc_name) {
     return reinterpret_cast<T>(GetProcAddress(module, proc_name));
   }
+  static UINT nativeDpiRefreshMessage() {
+    static const UINT message = RegisterWindowMessageW(L"visage.WindowWin32.NativeDpiRefresh");
+    return message;
+  }
+
+  // Older Windows SDKs do not name this DPI settings notification.
+  static constexpr WPARAM kSetLogicalDpiOverride = 0x009f;
+
+  static bool isPerMonitorDpiAware(HWND hwnd) {
+    static const HMODULE user32 = GetModuleHandleA("user32.dll");
+    static const auto window_context =
+        procedure<GetWindowDpiAwarenessContext_t>(user32, "GetWindowDpiAwarenessContext");
+    static const auto awareness = procedure<GetAwarenessFromDpiAwarenessContext_t>(
+        user32, "GetAwarenessFromDpiAwarenessContext");
+    return window_context && awareness &&
+           awareness(window_context(hwnd)) == DPI_AWARENESS_PER_MONITOR_AWARE;
+  }
+
 
   class NativeWindowLookup {
   public:
@@ -68,15 +87,12 @@ namespace visage {
 
     void addWindow(WindowWin32* window) {
       native_window_lookup_[window->nativeHandle()] = window;
-      if (window->parentHandle())
-        parent_window_lookup_[window->parentHandle()] = window;
     }
 
     void removeWindow(WindowWin32* window) {
-      if (parent_window_lookup_.count(window->parentHandle()))
-        parent_window_lookup_.erase(window->parentHandle());
-      if (native_window_lookup_.count(window->nativeHandle()))
-        native_window_lookup_.erase(window->nativeHandle());
+      auto it = native_window_lookup_.find(window->nativeHandle());
+      if (it != native_window_lookup_.end() && it->second == window)
+        native_window_lookup_.erase(it);
     }
 
     bool anyWindowOpen() const {
@@ -92,17 +108,29 @@ namespace visage {
       return it != native_window_lookup_.end() ? it->second : nullptr;
     }
 
-    WindowWin32* findByNativeParentHandle(HWND hwnd) {
-      auto it = parent_window_lookup_.find(hwnd);
-      return it != parent_window_lookup_.end() ? it->second : nullptr;
-    }
 
-    WindowWin32* findWindow(HWND hwnd) {
-      WindowWin32* window = findByNativeHandle(hwnd);
-      if (window)
-        return window;
-
-      return findByNativeParentHandle(hwnd);
+    template<typename Callback>
+    void forEachObservedWindow(HWND hwnd, Callback&& callback) {
+      auto it = native_window_lookup_.begin();
+      while (it != native_window_lookup_.end()) {
+        void* native = it->first;
+        WindowWin32* window = it->second;
+        bool observed = native == hwnd;
+        if (!observed) {
+          for (HWND ancestor = GetAncestor(static_cast<HWND>(native), GA_PARENT); ancestor;
+               ancestor = GetAncestor(ancestor, GA_PARENT)) {
+            if (ancestor == hwnd) {
+              observed = true;
+              break;
+            }
+          }
+        }
+        if (observed)
+          callback(window);
+        // A DPI callback may remove/recreate any editor. Do not retain an iterator
+        // or dereference its window after dispatching it.
+        it = native_window_lookup_.upper_bound(native);
+      }
     }
 
     void closeAll() {
@@ -115,7 +143,6 @@ namespace visage {
     NativeWindowLookup() = default;
     ~NativeWindowLookup() = default;
 
-    std::map<void*, WindowWin32*> parent_window_lookup_;
     std::map<void*, WindowWin32*> native_window_lookup_;
   };
 
@@ -307,11 +334,8 @@ namespace visage {
 
   class DpiAwareness {
   public:
-    // The plugin shares the host's process, so the process DPI awareness reflects the
-    // host. Our windows must use a matching awareness context: a per-monitor window
-    // inside a DPI-unaware host gets its coordinates and presentation scaled by the
-    // OS in incompatible ways, while a matching context keeps every coordinate space
-    // consistent (and makes GetDpiFor* report the values the host actually uses).
+    // Embedded windows and their coordinate operations use the actual HWND's
+    // context, including system-aware and virtualized unaware host contexts.
     static bool processDpiUnaware() {
       static const bool unaware = [] {
         HMODULE shcore = LoadLibraryA("shcore.dll");
@@ -328,55 +352,56 @@ namespace visage {
       return unaware;
     }
 
-    DpiAwareness() {
-      HMODULE user32 = LoadLibraryA("user32.dll");
+    explicit DpiAwareness(HWND hwnd = nullptr) {
+      HMODULE user32 = GetModuleHandleA("user32.dll");
       if (user32 == nullptr)
         return;
 
-      threadDpiAwarenessContext_ =
+      auto thread_context =
           procedure<GetThreadDpiAwarenessContext_t>(user32, "GetThreadDpiAwarenessContext");
+      auto window_context =
+          procedure<GetWindowDpiAwarenessContext_t>(user32, "GetWindowDpiAwarenessContext");
       setThreadDpiAwarenessContext_ =
           procedure<SetThreadDpiAwarenessContext_t>(user32, "SetThreadDpiAwarenessContext");
       dpiForWindow_ = procedure<GetDpiForWindow_t>(user32, "GetDpiForWindow");
       dpiForSystem_ = procedure<GetDpiForSystem_t>(user32, "GetDpiForSystem");
-      if (threadDpiAwarenessContext_ == nullptr || setThreadDpiAwarenessContext_ == nullptr ||
-          dpiForWindow_ == nullptr || dpiForSystem_ == nullptr) {
+      if (!thread_context || !setThreadDpiAwarenessContext_)
         return;
-      }
 
-      previous_dpi_awareness_ = threadDpiAwarenessContext_();
-      dpi_awareness_ = DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
-      if (processDpiUnaware())
-        dpi_awareness_ = DPI_AWARENESS_CONTEXT_UNAWARE;
-      if (!setThreadDpiAwarenessContext_(dpi_awareness_)) {
-        dpi_awareness_ = DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE;
-        setThreadDpiAwarenessContext_(dpi_awareness_);
+      DPI_AWARENESS_CONTEXT context = thread_context();
+      if (hwnd) {
+        if (window_context)
+          context = window_context(hwnd);
       }
+      else
+        context = processDpiUnaware() ? DPI_AWARENESS_CONTEXT_UNAWARE :
+                                       DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
+
+      if (context)
+        previous_dpi_awareness_ = setThreadDpiAwarenessContext_(context);
+      if (!previous_dpi_awareness_ && !hwnd &&
+          context == DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        previous_dpi_awareness_ =
+            setThreadDpiAwarenessContext_(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE);
     }
 
     ~DpiAwareness() {
-      if (setThreadDpiAwarenessContext_)
+      if (setThreadDpiAwarenessContext_ && previous_dpi_awareness_)
         setThreadDpiAwarenessContext_(previous_dpi_awareness_);
     }
 
     float dpiScale() const {
-      if (dpi_awareness_ == nullptr)
-        return 1.0f;
-
-      return dpiForSystem_() / Window::kDefaultDpi;
+      const UINT dpi = dpiForSystem_ ? dpiForSystem_() : 0;
+      return dpi ? dpi / Window::kDefaultDpi : 1.0f;
     }
 
     float dpiScale(HWND hwnd) const {
-      if (dpi_awareness_ == nullptr)
-        return 1.0f;
-
-      return dpiForWindow_(hwnd) / Window::kDefaultDpi;
+      const UINT dpi = dpiForWindow_ ? dpiForWindow_(hwnd) : 0;
+      return dpi ? dpi / Window::kDefaultDpi : 1.0f;
     }
 
   private:
-    DPI_AWARENESS_CONTEXT dpi_awareness_ = nullptr;
     DPI_AWARENESS_CONTEXT previous_dpi_awareness_ = nullptr;
-    GetThreadDpiAwarenessContext_t threadDpiAwarenessContext_ = nullptr;
     SetThreadDpiAwarenessContext_t setThreadDpiAwarenessContext_ = nullptr;
     GetDpiForWindow_t dpiForWindow_ = nullptr;
     GetDpiForSystem_t dpiForSystem_ = nullptr;
@@ -1043,9 +1068,26 @@ namespace visage {
   }
 
   LRESULT WindowWin32::handleWindowProc(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param) {
+    const UINT refresh_message = nativeDpiRefreshMessage();
+    if (refresh_message && msg == refresh_message) {
+      if (w_param == reinterpret_cast<WPARAM>(this))
+        refreshNativeDpi(true);
+      return 0;
+    }
     switch (msg) {
     case WM_VBLANK: {
+      if (!refreshNativeDpi())
+        return 0;
       drawCallback(v_blank_thread_->vBlankTime());
+      return 0;
+    }
+    case WM_ERASEBKGND: {
+      return 1;
+    }
+    case WM_PAINT: {
+      PAINTSTRUCT paint {};
+      BeginPaint(hwnd, &paint);
+      EndPaint(hwnd, &paint);
       return 0;
     }
     case WM_SYSKEYDOWN:
@@ -1225,20 +1267,32 @@ namespace visage {
       return TRUE;
     }
     case WM_SIZE: {
-      handleResizeEnd(hwnd);
+      handleResizeEnd();
       return TRUE;
     }
     case WM_EXITSIZEMOVE: {
-      handleResizeEnd(hwnd);
+      handleResizeEnd();
       return 0;
     }
     case WM_DPICHANGED: {
       handleDpiChange(hwnd, l_param, w_param);
       return 0;
     }
-    case WM_MOVE:
-    case WM_DISPLAYCHANGE: {
+    case WM_DPICHANGED_BEFOREPARENT: {
+      if (isPerMonitorDpiAware(hwnd))
+        beginDpiChange();
+      return 0;
+    }
+    case WM_DPICHANGED_AFTERPARENT: {
+      refreshNativeDpi(true);
+      return 0;
+    }
+    case WM_MOVE: {
       updateMonitor();
+      return 0;
+    }
+    case WM_DISPLAYCHANGE: {
+      refreshNativeDpi(true);
       return 0;
     }
     default: break;
@@ -1246,21 +1300,6 @@ namespace visage {
     return DefWindowProc(hwnd, msg, w_param, l_param);
   }
 
-  static LRESULT WINAPI pluginParentWindowProc(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param) {
-    WindowWin32* child_window = NativeWindowLookup::instance().findWindow(hwnd);
-    if (child_window == nullptr)
-      return 0;
-
-    if (msg == WM_SIZING) {
-      child_window->handleResizing(hwnd, l_param, w_param);
-      return TRUE;
-    }
-    if (msg == WM_DPICHANGED) {
-      child_window->handleDpiChange(hwnd, l_param, w_param);
-      return 0;
-    }
-    return CallWindowProc(child_window->parentWindowProc(), hwnd, msg, w_param, l_param);
-  }
 
   static LRESULT WINAPI standaloneWindowProcedure(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param) {
     WindowWin32* window = reinterpret_cast<WindowWin32*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
@@ -1355,12 +1394,39 @@ namespace visage {
     return CallNextHookEx(event_hook_, code, w_param, l_param);
   }
 
+
+  LRESULT CALLBACK EventHooks::callWindowHook(int code, WPARAM w_param, LPARAM l_param) {
+    const DWORD saved_error = GetLastError();
+    if (code == HC_ACTION && l_param) {
+      const auto* message = reinterpret_cast<const CWPSTRUCT*>(l_param);
+      const UINT msg = message->message;
+      const bool dpi = msg == WM_DPICHANGED || msg == WM_DPICHANGED_BEFOREPARENT ||
+                       msg == WM_DPICHANGED_AFTERPARENT || msg == WM_DISPLAYCHANGE ||
+                       msg == WM_SETTINGCHANGE || msg == WM_MOVE;
+      if (dpi) {
+        NativeWindowLookup::instance().forEachObservedWindow(
+            message->hwnd, [&](WindowWin32* window) {
+          // Ancestor observation supplies DPI notifications for PMv1 hosts.
+          if (message->hwnd != window->windowHandle())
+            window->handleAncestorDpiMessage(msg, message->wParam);
+        });
+      }
+    }
+    SetLastError(saved_error);
+    return CallNextHookEx(call_window_hook_, code, w_param, l_param);
+  }
   HHOOK EventHooks::event_hook_ = nullptr;
+  HHOOK EventHooks::call_window_hook_ = nullptr;
   int EventHooks::instance_count_ = 0;
 
   EventHooks::EventHooks() {
-    if (instance_count_++ == 0 && event_hook_ == nullptr)
-      event_hook_ = SetWindowsHookEx(WH_GETMESSAGE, eventHook, loadModuleHandle(), GetCurrentThreadId());
+    if (instance_count_++ == 0) {
+      if (event_hook_ == nullptr)
+        event_hook_ = SetWindowsHookEx(WH_GETMESSAGE, eventHook, loadModuleHandle(), GetCurrentThreadId());
+      if (call_window_hook_ == nullptr)
+        call_window_hook_ = SetWindowsHookEx(WH_CALLWNDPROC, callWindowHook, loadModuleHandle(),
+                                           GetCurrentThreadId());
+    }
   }
 
   EventHooks::~EventHooks() {
@@ -1368,6 +1434,10 @@ namespace visage {
     if (instance_count_ == 0 && event_hook_) {
       UnhookWindowsHookEx(event_hook_);
       event_hook_ = nullptr;
+    }
+    if (instance_count_ == 0 && call_window_hook_) {
+      UnhookWindowsHookEx(call_window_hook_);
+      call_window_hook_ = nullptr;
     }
   }
 
@@ -1404,7 +1474,7 @@ namespace visage {
     window_class_.hInstance = module_handle_;
     window_class_.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
     window_class_.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    window_class_.hbrBackground = CreateSolidBrush(RGB(32, 32, 32));
+    window_class_.hbrBackground = nullptr;
     window_class_.lpszMenuName = nullptr;
     window_class_.lpszClassName = unique_window_class_name_.c_str();
 #if VISAGE_WINDOWS_ICON_RESOURCE
@@ -1453,7 +1523,10 @@ namespace visage {
 
   std::unique_ptr<Window> createPluginWindow(const Dimension& width, const Dimension& height,
                                              void* parent_handle) {
-    IBounds bounds = computeWindowBounds(0, 0, width, height);
+    HWND parent = static_cast<HWND>(parent_handle);
+    DpiAwareness dpi_awareness(parent);
+    IBounds bounds = boundsInMonitor(MonitorFromWindow(parent, MONITOR_DEFAULTTONEAREST),
+                                    dpi_awareness.dpiScale(parent), 0, 0, width, height);
     return std::make_unique<WindowWin32>(bounds.width(), bounds.height(), parent_handle);
   }
 
@@ -1499,7 +1572,7 @@ namespace visage {
   WindowWin32::WindowWin32(int width, int height, void* parent_handle) : Window(width, height) {
     static constexpr int kWindowFlags = WS_CHILD;
 
-    DpiAwareness dpi_awareness;
+    DpiAwareness dpi_awareness(static_cast<HWND>(parent_handle));
 
     registerWindowClass();
     window_class_.lpfnWndProc = windowProcedure;
@@ -1515,24 +1588,19 @@ namespace visage {
       return;
     }
 
-    // Take the dpi scale from our own window: it shares the host's dpi awareness
-    // context (see DpiAwareness), so it reports the scale the host actually uses -
-    // the real monitor dpi for aware hosts, virtualized 96-dpi for unaware ones.
+    // This HWND inherits the actual parent context: monitor DPI for per-monitor
+    // hosts, system DPI for system-aware hosts, and virtualized 96 DPI for unaware hosts.
     setDpiScale(dpi_awareness.dpiScale(window_handle_));
 
     SetWindowLongPtr(window_handle_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-
-    auto parent_proc = SetWindowLongPtr(parent_handle_, GWLP_WNDPROC,
-                                        reinterpret_cast<LONG_PTR>(pluginParentWindowProc));
-    parent_window_proc_ = reinterpret_cast<WNDPROC>(parent_proc);
 
     event_hooks_ = std::make_unique<EventHooks>();
     finishWindowSetup();
   }
 
   void WindowWin32::finishWindowSetup() {
+    observed_native_dpi_scale_ = nativeDpiScale();
     NativeWindowLookup::instance().addWindow(this);
-
     UpdateWindow(window_handle_);
     if (drag_drop_target_)
       RegisterDragDrop(window_handle_, drag_drop_target_);
@@ -1546,10 +1614,8 @@ namespace visage {
       drag_drop_target_->Release();
     }
 
-    if (parent_handle_)
-      SetWindowLongPtr(parent_handle_, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(parent_window_proc_));
-
     NativeWindowLookup::instance().removeWindow(this);
+
     KillTimer(window_handle_, kTimerId);
     DestroyWindow(window_handle_);
     UnregisterClass(window_class_.lpszClassName, module_handle_);
@@ -1560,7 +1626,13 @@ namespace visage {
     if (window_handle_ == nullptr)
       return;
 
-    DpiAwareness dpi_awareness;
+    DpiAwareness dpi_awareness(window_handle_);
+    if (parent_handle_) {
+      RECT client {};
+      if (GetClientRect(window_handle_, &client) && client.right - client.left == width &&
+          client.bottom - client.top == height)
+        return;
+    }
     RECT rect;
     GetWindowRect(window_handle_, &rect);
     int x = rect.left;
@@ -1667,10 +1739,7 @@ namespace visage {
   }
 
   bool WindowWin32::handleHookedMessage(const MSG* message) {
-    // TODO: Plugin window doesn't scale right if you resize the windows using
-    // a key command and parent window was not dpi aware
-
-    DpiAwareness dpi_awareness;
+    DpiAwareness dpi_awareness(window_handle_);
 
     bool character = message->message == WM_CHAR || message->message == WM_SYSCHAR;
     bool key_down = message->message == WM_KEYDOWN || message->message == WM_SYSKEYDOWN;
@@ -1711,6 +1780,8 @@ namespace visage {
     bool horizontal_resize = w_param == WMSZ_LEFT || w_param == WMSZ_RIGHT || diagonal;
     bool vertical_resize = w_param == WMSZ_TOP || w_param == WMSZ_BOTTOM || diagonal;
     handleAdjustResize(&width, &height, horizontal_resize, vertical_resize);
+    if (NativeWindowLookup::instance().findByNativeHandle(hwnd) != this)
+      return;
 
     switch (w_param) {
     case WMSZ_LEFT:
@@ -1749,37 +1820,114 @@ namespace visage {
     }
   }
 
-  void WindowWin32::handleResizeEnd(HWND hwnd) {
-    IBounds borders = windowBorderSize(hwnd);
-    RECT rect;
-    GetWindowRect(hwnd, &rect);
-    int width = rect.right - rect.left - borders.width();
-    int height = rect.bottom - rect.top - borders.height();
+  float WindowWin32::nativeDpiScale() const {
+    static const HMODULE user32 = GetModuleHandleA("user32.dll");
+    static const auto dpi_for_window = procedure<GetDpiForWindow_t>(user32, "GetDpiForWindow");
+    const UINT dpi = dpi_for_window && window_handle_ ? dpi_for_window(window_handle_) : 0;
+    return dpi ? dpi / Window::kDefaultDpi : dpiScale();
+  }
 
-    DpiAwareness dpi_awareness;
-    if (dpiScaleOverride() > 0.0f)
-      setDpiScale(dpiScaleOverride());
-    else
-      setDpiScale(dpi_awareness.dpiScale(hwnd));
-    handleResized(width, height);
+  void WindowWin32::handleAncestorDpiMessage(UINT msg, WPARAM w_param) {
+    if (msg == WM_SETTINGCHANGE && w_param == kSetLogicalDpiOverride) {
+      if (isPerMonitorDpiAware(window_handle_))
+        beginDpiChange();
+      return;
+    }
+
+    if (msg != WM_DPICHANGED && msg != WM_DISPLAYCHANGE &&
+        !(msg == WM_SETTINGCHANGE && w_param == SPI_SETWORKAREA))
+      return;
+
+    // Run on the child's thread after the host handles the original notification.
+    const UINT refresh_message = nativeDpiRefreshMessage();
+    if (refresh_message)
+      PostMessage(window_handle_, refresh_message, reinterpret_cast<WPARAM>(this), 0);
+    if (msg == WM_DPICHANGED && isPerMonitorDpiAware(window_handle_))
+      beginDpiChange();
+  }
+
+  bool WindowWin32::refreshNativeDpi(bool finish_pending, bool resize) {
+    const HWND native = window_handle_;
+    auto& lookup = NativeWindowLookup::instance();
+    if (lookup.findByNativeHandle(native) != this || !IsWindow(native))
+      return false;
+    if (refreshing_native_dpi_)
+      return true;
+
+    const float native_scale = nativeDpiScale();
+    const bool changed = native_scale != observed_native_dpi_scale_;
+    if (!changed && !resize && !(finish_pending && dpiChangePending())) {
+      if (finish_pending)
+        updateMonitor();
+      return true;
+    }
+
+    refreshing_native_dpi_ = true;
+    if (changed)
+      beginDpiChange();
+    if (lookup.findByNativeHandle(native) != this || !IsWindow(native))
+      return false;
+
+    // Track the OS independently of rendered scale and commit the observation
+    // before any frame or end callback can reenter host sizing.
+    observed_native_dpi_scale_ = native_scale;
+    setDpiScale(native_scale);
+    updateMonitor();
+    RECT client {};
+    GetClientRect(native, &client);
+    handleResized(client.right - client.left, client.bottom - client.top);
+    if (lookup.findByNativeHandle(native) != this || !IsWindow(native))
+      return false;
+
+    refreshing_native_dpi_ = false;
+    if (changed || finish_pending)
+      endDpiChange();
+    return lookup.findByNativeHandle(native) == this && IsWindow(native);
+  }
+
+  void WindowWin32::handleResizeEnd() {
+    // Refresh first: WM_SIZE can arrive before any child DPI notification.
+    refreshNativeDpi(false, true);
   }
 
   void WindowWin32::handleDpiChange(HWND hwnd, LPARAM l_param, WPARAM w_param) {
+    // A host's suggested top-level screen rectangle never belongs to an embedded child.
+    if (parent_handle_ || hwnd != window_handle_ || !l_param) {
+      refreshNativeDpi(true);
+      return;
+    }
+
+    const RECT suggested = *reinterpret_cast<const RECT*>(l_param);
+    const float new_scale = LOWORD(w_param) ? LOWORD(w_param) / Window::kDefaultDpi :
+                                            nativeDpiScale();
+    auto& lookup = NativeWindowLookup::instance();
+    refreshing_native_dpi_ = true;
+    beginDpiChange();
+    if (lookup.findByNativeHandle(hwnd) != this || !IsWindow(hwnd))
+      return;
+
+    observed_native_dpi_scale_ = new_scale;
+    setDpiScale(new_scale);
     IBounds borders = windowBorderSize(hwnd);
-    RECT* suggested = reinterpret_cast<RECT*>(l_param);
-    int width = suggested->right - suggested->left - borders.width();
-    int height = suggested->bottom - suggested->top - borders.height();
-
+    int width = suggested.right - suggested.left - borders.width();
+    int height = suggested.bottom - suggested.top - borders.height();
     handleAdjustResize(&width, &height, true, true);
+    if (lookup.findByNativeHandle(hwnd) != this || !IsWindow(hwnd))
+      return;
 
-    DpiAwareness dpi_awareness;
-    if (dpiScaleOverride() > 0.0f)
-      setDpiScale(dpiScaleOverride());
-    else
-      setDpiScale(dpi_awareness.dpiScale(hwnd));
-    handleResized(width, height);
-    SetWindowPos(hwnd, nullptr, suggested->left, suggested->top, width + borders.width(),
+    SetWindowPos(hwnd, nullptr, suggested.left, suggested.top, width + borders.width(),
                  height + borders.height(), SWP_NOZORDER | SWP_NOACTIVATE);
+    if (lookup.findByNativeHandle(hwnd) != this || !IsWindow(hwnd))
+      return;
+    updateMonitor();
+    RECT client {};
+    GetClientRect(hwnd, &client);
+    handleResized(client.right - client.left, client.bottom - client.top);
+    if (lookup.findByNativeHandle(hwnd) != this || !IsWindow(hwnd))
+      return;
+
+    refreshing_native_dpi_ = false;
+    endDpiChange();
   }
 
   void WindowWin32::updateMonitor() {

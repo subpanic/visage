@@ -75,6 +75,7 @@ namespace visage {
       virtual void handleAdjustResize(int* width, int* height, bool horizontal_resize,
                                       bool vertical_resize) { }
       virtual void handleResized(int width, int height) = 0;
+      virtual void handleDpiChange(bool beginning) { }
 
       virtual void handleWindowShown() = 0;
       virtual void handleWindowHidden() = 0;
@@ -134,10 +135,10 @@ namespace visage {
     void setDpiScale(float scale) { dpi_scale_ = scale; }
     float dpiScale() const { return dpi_scale_; }
 
-    // Explicit dpi scale override (e.g. from a host-provided content scale factor).
-    // When > 0, platform resize/dpi handlers use it instead of querying the OS.
-    void setDpiScaleOverride(float scale) { dpi_scale_override_ = scale; }
-    float dpiScaleOverride() const { return dpi_scale_override_; }
+    virtual float nativeDpiScale() const { return dpi_scale_; }
+    bool dpiChangePending() const { return dpi_change_pending_; }
+    void beginDpiChange();
+    void endDpiChange();
 
     IPoint convertToNative(const Point& logical_point) const {
       return { static_cast<int>(std::round(logical_point.x * dpi_scale_)),
@@ -207,7 +208,7 @@ namespace visage {
 
     std::function<void(double)> draw_callback_ = nullptr;
     float dpi_scale_ = 1.0f;
-    float dpi_scale_override_ = 0.0f;
+    bool dpi_change_pending_ = false;
     bool visible_ = true;
     bool mouse_relative_mode_ = false;
     int client_width_ = 0;

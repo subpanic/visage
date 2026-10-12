@@ -56,6 +56,7 @@ namespace visage {
     auto& onHide() { return on_hide_; }
     auto& onCloseRequested() { return on_close_requested_; }
     auto& onWindowContentsResized() { return on_window_contents_resized_; }
+    auto& onWindowDpiChange() { return on_window_dpi_change_; }
 
     void notifyContentsResized();
     const Screenshot& takeScreenshot();
@@ -121,6 +122,7 @@ namespace visage {
     CallbackList<void()> on_hide_;
     CallbackList<bool()> on_close_requested_;
     CallbackList<void()> on_window_contents_resized_;
+    CallbackList<void(bool)> on_window_dpi_change_;
 
     float fixed_aspect_ratio_ = 0.0f;
     float min_width_ = 0.0f;

@@ -39,6 +39,7 @@ namespace visage {
   class EventHooks {
   public:
     static LRESULT CALLBACK eventHook(int code, WPARAM w_param, LPARAM l_param);
+    static LRESULT CALLBACK callWindowHook(int code, WPARAM w_param, LPARAM l_param);
 
     EventHooks();
     ~EventHooks();
@@ -46,6 +47,7 @@ namespace visage {
   private:
     static int instance_count_;
     static HHOOK event_hook_;
+    static HHOOK call_window_hook_;
   };
 
   class WindowWin32 : public Window {
@@ -70,6 +72,7 @@ namespace visage {
     void* nativeHandle() const override { return window_handle_; }
     void* initWindow() const override { return nullptr; }
     HWND parentHandle() const { return parent_handle_; }
+    float nativeDpiScale() const override;
 
     void windowContentsResized(int width, int height) override;
     void show() override;
@@ -88,16 +91,17 @@ namespace visage {
     bool handleCharacterEntry(wchar_t character);
     bool handleHookedMessage(const MSG* message);
     void handleResizing(HWND hwnd, LPARAM l_param, WPARAM w_param);
-    void handleResizeEnd(HWND hwnd);
+    void handleResizeEnd();
     void handleDpiChange(HWND hwnd, LPARAM l_param, WPARAM w_param);
+    void handleAncestorDpiMessage(UINT msg, WPARAM w_param);
     void updateMonitor();
     HMONITOR monitor() const { return monitor_.load(); }
-    WNDPROC parentWindowProc() const { return parent_window_proc_; }
     Window::Decoration decoration() const { return decoration_; }
 
   private:
     void show(int show_flag);
     void registerWindowClass();
+    bool refreshNativeDpi(bool finish_pending = false, bool resize = false);
 
     std::wstring unique_window_class_name_;
     WNDCLASSEX window_class_ = {};
@@ -105,7 +109,6 @@ namespace visage {
     HWND parent_handle_ = nullptr;
     HMODULE module_handle_ = nullptr;
     std::atomic<HMONITOR> monitor_ = nullptr;
-    WNDPROC parent_window_proc_ = nullptr;
     std::unique_ptr<EventHooks> event_hooks_;
     DragDropTarget* drag_drop_target_ = nullptr;
     std::unique_ptr<VBlankThread> v_blank_thread_;
@@ -114,6 +117,8 @@ namespace visage {
     std::wstring utf16_string_entry_;
     bool initialized_ = false;
     bool mouse_tracked_ = false;
+    float observed_native_dpi_scale_ = 1.0f;
+    bool refreshing_native_dpi_ = false;
     int mouse_down_flags_ = 0;
   };
 }

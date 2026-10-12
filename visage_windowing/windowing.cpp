@@ -52,6 +52,22 @@ namespace visage {
       event_handler_->handleResized(width, height);
   }
 
+  void Window::beginDpiChange() {
+    if (dpi_change_pending_)
+      return;
+    dpi_change_pending_ = true;
+    if (event_handler_)
+      event_handler_->handleDpiChange(true);
+  }
+
+  void Window::endDpiChange() {
+    if (!dpi_change_pending_)
+      return;
+    dpi_change_pending_ = false;
+    if (event_handler_)
+      event_handler_->handleDpiChange(false);
+  }
+
   void Window::handleAdjustResize(int* width, int* height, bool horizontal_resize, bool vertical_resize) {
     if (event_handler_)
       event_handler_->handleAdjustResize(width, height, horizontal_resize, vertical_resize);
@@ -100,7 +116,9 @@ namespace visage {
   }
 
   void Window::setWindowSize(int width, int height) {
-    setNativeWindowSize(std::round(width * dpi_scale_), std::round(height * dpi_scale_));
+    // Match the adapters' double-precision logical-to-host pixel rounding.
+    setNativeWindowSize(static_cast<int>(std::round(width * static_cast<double>(dpi_scale_))),
+                        static_cast<int>(std::round(height * static_cast<double>(dpi_scale_))));
   }
 
   void Window::setNativeWindowSize(int width, int height) {
