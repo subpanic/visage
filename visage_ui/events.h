@@ -100,6 +100,13 @@ namespace visage {
     bool isMouse() const { return !isTouch(); }
     bool isTouch() const { return button_state & kMouseButtonTouch; }
     bool hasWheelMomentum() const { return wheel_momentum; }
+    // True only when the operating system reports a continuous (trackpad) scroll source. Never
+    // inferred from delta magnitude, so discrete mouse wheels stay false on every platform.
+    bool isTrackpadScroll() const { return wheel_is_trackpad; }
+    // Physical state of the space bar when this event was generated.
+    bool isSpaceDown() const { return space_down; }
+    // Pinch magnification factor: 1.0f means no change, >1.0f zooms in, <1.0f zooms out.
+    float pinchScale() const { return pinch_scale; }
     int repeatClickCount() const { return repeat_click_count; }
 
     bool isLeftButtonCurrentlyDown() const { return button_state & kMouseButtonLeft; }
@@ -131,6 +138,9 @@ namespace visage {
     float precise_wheel_delta_y = 0.0f;
     bool wheel_reversed = false;
     bool wheel_momentum = false;
+    bool wheel_is_trackpad = false;
+    bool space_down = false;
+    float pinch_scale = 1.0f;
     int repeat_click_count = 0;
   };
 

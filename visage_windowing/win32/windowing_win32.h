@@ -30,10 +30,12 @@
 
 #include <atomic>
 #include <iostream>
+#include <memory>
 #include <windows.h>
 
 namespace visage {
   class DragDropTarget;
+  class DirectManipulation;
   class VBlankThread;
 
   class EventHooks {
@@ -112,6 +114,7 @@ namespace visage {
     std::unique_ptr<EventHooks> event_hooks_;
     DragDropTarget* drag_drop_target_ = nullptr;
     std::unique_ptr<VBlankThread> v_blank_thread_;
+    std::shared_ptr<DirectManipulation> direct_manipulation_;
 
     Window::Decoration decoration_ = Window::Decoration::Native;
     std::wstring utf16_string_entry_;

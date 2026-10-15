@@ -30,6 +30,86 @@
 #include <thread>
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#include <X11/extensions/XInput2.h>
+
+// Gesture (pinch/swipe) support requires XI 2.4. The constants and the pinch
+// event struct are missing from libXi headers older than 1.7.2, so provide the
+// protocol definitions locally; whether the running server speaks XI 2.4 is
+// decided at runtime through XIQueryVersion.
+#ifndef XI_GesturePinchBegin
+#define XI_GesturePinchBegin 27
+#define XI_GesturePinchUpdate 28
+#define XI_GesturePinchEnd 29
+#define XIGesturePinchEventCancelled (1 << 0)
+#define XIGestureClass 9
+
+struct XIGestureClassInfo {
+  int type;
+  int sourceid;
+  int num_touches;
+};
+
+struct XIGesturePinchEvent {
+  int type;
+  unsigned long serial;
+  Bool send_event;
+  Display* display;
+  int extension;
+  int evtype;
+  Time time;
+  int deviceid;
+  int sourceid;
+  int detail;
+  Window root;
+  Window event;
+  Window child;
+  double root_x;
+  double root_y;
+  double event_x;
+  double event_y;
+  double delta_x;
+  double delta_y;
+  double delta_unaccel_x;
+  double delta_unaccel_y;
+  double scale;
+  double delta_angle;
+  int flags;
+  XIModifierState mods;
+  XIGroupState group;
+};
+#endif
+
+// Smooth scrolling valuator classes arrived with XI 2.1; the same guard style keeps this
+// file compiling against headers from before that.
+#ifndef XIScrollClass
+#define XIScrollClass 3
+#define XIScrollTypeVertical 1
+#define XIScrollTypeHorizontal 2
+#define XIScrollFlagNoEmulation (1 << 0)
+#define XIScrollFlagPreferred (1 << 1)
+
+struct XIScrollClassInfo {
+  int type;
+  int sourceid;
+  int number;
+  int scroll_type;
+  double increment;
+  int flags;
+};
+#endif
+
+#ifndef XIDependentTouch
+#define XIDirectTouch 1
+#define XIDependentTouch 2
+#define XITouchClass 8
+
+struct XITouchClassInfo {
+  int type;
+  int sourceid;
+  int mode;
+  int num_touches;
+};
+#endif
 
 namespace visage {
   enum DecoratorOperation {
@@ -117,7 +197,15 @@ namespace visage {
       dnd_types_[0] = dnd_uri_list_;
       dnd_actions_[0] = dnd_action_copy_;
       dnd_actions_[1] = dnd_action_none_;
+      // Read-only device properties that only touchpad-class devices carry, interned without
+      // creating them on servers whose drivers do not provide them.
+      input_tapping_ = XInternAtom(display_, "libinput Tapping Enabled", True);
+      input_disable_while_typing_ =
+          XInternAtom(display_, "libinput Disable While Typing Enabled", True);
+      input_click_methods_ = XInternAtom(display_, "libinput Click Methods Available", True);
+      input_synaptics_capabilities_ = XInternAtom(display_, "Synaptics Capabilities", True);
       cursors_ = std::make_unique<Cursors>(display_);
+      initializeXInput2();
     }
 
     X11Connection(const X11Connection& copy) = delete;
@@ -155,8 +243,28 @@ namespace visage {
     const Cursors& cursors() const { return *cursors_; }
     int fd() const { return fd_; }
 
+    bool xinput2Available() const { return xinput2_available_; }
+    // XI 2.4 added pinch/swipe gesture events, the newest XInput2 feature used here.
+    static constexpr int kGestureMinorVersion = 4;
+    bool xinput2GesturesAvailable() const { return xinput2_minor_version_ >= kGestureMinorVersion; }
+
+    // Property names of settings that only exist for touchpad-class devices.
+    bool isTouchpadProperty(Atom property) const {
+      return property != None &&
+             (property == input_tapping_ || property == input_disable_while_typing_ ||
+              property == input_click_methods_ || property == input_synaptics_capabilities_);
+    }
+
   private:
+    void initializeXInput2();
+
     ::Display* display_ = nullptr;
+    bool xinput2_available_ = false;
+    int xinput2_minor_version_ = 0;
+    Atom input_tapping_ = None;
+    Atom input_disable_while_typing_ = None;
+    Atom input_click_methods_ = None;
+    Atom input_synaptics_capabilities_ = None;
     int fd_ = 0;
     ::Window root_ = 0;
     Atom clipboard_ = 0;
@@ -216,6 +324,8 @@ namespace visage {
     void processPluginFdEvents() override;
     void processMessageWindowEvent(XEvent& event);
     void processEvent(XEvent& event);
+    void processXInput2Event(XEvent& event);
+    void clearInputDeviceStates() { input_devices_.clear(); }
 
     void* nativeHandle() const override { return (void*)window_handle_; }
 
@@ -248,6 +358,35 @@ namespace visage {
       ::Window target = 0;
     };
 
+    // A pointer event reduced to the data the platform independent handling below needs,
+    // shared by core and XInput2 delivery.
+    struct PointerEvent {
+      int x = 0;
+      int y = 0;
+      int root_x = 0;
+      int root_y = 0;
+      int button = 0;
+      unsigned long time = 0;
+    };
+
+    struct ScrollValuator {
+      int axis = 0;
+      bool vertical = false;
+      double increment = 1.0;
+      double last_value = 0.0;
+      bool has_last_value = false;
+    };
+
+    struct InputDeviceState {
+      bool queried = false;
+      bool trackpad = false;
+      // Set while smooth scroll deltas are being delivered, which makes the legacy scroll buttons
+      // the server emulates from the same valuators redundant.
+      bool smooth_scroll_active = false;
+      std::vector<ScrollValuator> scroll_valuators;
+      double pinch_scale = 1.0;
+    };
+
     ::Window parentHandle() const { return parent_handle_; }
 
     void createWindow(IBounds bounds);
@@ -255,6 +394,21 @@ namespace visage {
     void passEventToParent(XEvent& event);
     int mouseButtonState() const;
     int modifierState() const;
+
+    void selectXInputEvents();
+    void reloadInputDeviceStates();
+    void loadInputDeviceState(const XIDeviceInfo& device, InputDeviceState& state);
+    void processXInput2GenericEvent(XEvent& event);
+    void processXInput2Motion(XIDeviceEvent* device_event);
+    void processXInput2Button(XIDeviceEvent* device_event, bool press);
+    void processXInput2Pinch(XIGesturePinchEvent* pinch_event);
+    InputDeviceState& inputDeviceState(int device_id);
+    void pointerScrollForEvent(const XIDeviceEvent* device_event, InputDeviceState& state,
+                               float& delta_x, float& delta_y);
+    void processPointerMotion(const PointerEvent& pointer);
+    void processPointerButtonPress(const PointerEvent& pointer);
+    void processPointerButtonRelease(const PointerEvent& pointer);
+    void passButtonToParent(bool press, const PointerEvent& pointer);
 
     ::Window windowUnderCursor(::Window inside);
     ::Window windowUnderCursor();
@@ -290,6 +444,7 @@ namespace visage {
     ::Window parent_handle_ = 0;
     bool parent_configure_recreate_pending_ = false;
     std::map<KeySym, bool> pressed_;
+    std::map<int, InputDeviceState> input_devices_;
     long long start_microseconds_ = 0;
     std::atomic<long long> timer_microseconds_ = 16667;
     std::atomic<bool> timer_thread_running_ = false;

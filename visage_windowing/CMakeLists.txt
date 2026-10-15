@@ -17,8 +17,13 @@ elseif (UNIX)
   file(GLOB PLATFORM_HEADER_FILES linux/*.h)
 
   find_package(X11 REQUIRED)
-  set(X11_LIBS ${X11_LIBRARIES} ${X11_Xrandr_LIB})
-  set(X11_INCLUDES ${X11_INCLUDE_DIR} ${Xrandr_INCLUDE_DIR})
+  if (NOT X11_Xi_FOUND)
+    message(FATAL_ERROR
+      "libXi development files not found. The Linux windowing backend needs XInput2 for "
+      "trackpad scrolling and pinch gestures (Debian/Ubuntu: libxi-dev, Fedora: libXi-devel).")
+  endif ()
+  set(X11_LIBS ${X11_LIBRARIES} ${X11_Xrandr_LIB} ${X11_Xi_LIB})
+  set(X11_INCLUDES ${X11_INCLUDE_DIR} ${Xrandr_INCLUDE_DIR} ${X11_Xi_INCLUDE_PATH})
 endif ()
 
 file(GLOB HEADERS *.h)

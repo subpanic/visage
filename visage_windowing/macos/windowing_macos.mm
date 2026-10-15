@@ -516,13 +516,20 @@ namespace visage {
   float precise_x = delta_x;
   float delta_y = [event deltaY];
   float precise_y = delta_y;
-  if ([event hasPreciseScrollingDeltas]) {
+  bool trackpad = [event hasPreciseScrollingDeltas] != 0;
+  if (trackpad) {
     precise_x = [event scrollingDeltaX] * kPreciseScrollingScale;
     precise_y = [event scrollingDeltaY] * kPreciseScrollingScale;
   }
   self.visage_window->handleMouseWheel(delta_x, delta_y, precise_x, precise_y, point.x, point.y,
                                        [self mouseButtonState], [self keyboardModifiers:event],
-                                       [event momentumPhase] != NSEventPhaseNone);
+                                       [event momentumPhase] != NSEventPhaseNone, trackpad);
+}
+
+- (void)magnifyWithEvent:(NSEvent*)event {
+  visage::Point point = [self eventPosition:event];
+  self.visage_window->handleMouseMagnify([event magnification], point.x, point.y,
+                                         [self mouseButtonState], [self keyboardModifiers:event]);
 }
 
 - (void)mouseMoved:(NSEvent*)event {

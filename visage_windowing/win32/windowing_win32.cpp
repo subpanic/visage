@@ -38,6 +38,8 @@
 #include "visage_utils/thread_utils.h"
 
 #include <algorithm>
+#include <cmath>
+#include <directmanipulation.h>
 #include <dxgi1_4.h>
 #include <map>
 #include <ShlObj.h>
@@ -961,6 +963,17 @@ namespace visage {
     return (GetMessageExtraInfo() & 0xFFFFFF00) == 0xFF515700;
   }
 
+  // Windows tags the scroll messages it promotes from a touch or pen digitizer with
+  // MI_WP_SIGNATURE (0xFF515700) in the value returned by GetMessageExtraInfo(), and the
+  // documented 0x80 bit of the low byte separates touch input (set) from pen input (clear). A
+  // precision touchpad reports its contacts as a touch digitizer, so a promoted scroll carrying
+  // the touch flag is continuous touch-class scrolling rather than a wheel notch; a promoted
+  // scroll that originates from a touchscreen carries the same tag. The device origin comes from
+  // the OS; delta magnitude is never inspected.
+  static bool isTouchpadScrollMessage() {
+    return (GetMessageExtraInfo() & 0xFFFFFF80) == 0xFF515780;
+  }
+
   static int mouseButtonState(WPARAM w_param) {
     int state = 0;
     if (w_param & MK_LBUTTON)
@@ -1046,6 +1059,503 @@ namespace visage {
     return true;
   }
 
+  // Direct Manipulation is the touchpad gesture consumer Microsoft documents for HWND based UI:
+  // without it, precision touchpad pan/zoom input is rerouted through the system's default
+  // handling and reaches the window only as promoted wheel messages, which cannot be told apart
+  // from a wheel or carry magnification.
+  //
+  // The API is activated per HWND, so the plugin window can host it without the process-global
+  // input routing change that EnableMouseInPointer causes for every window of the host. Windows
+  // offers touchpad contacts to the activated window through DM_POINTERHITTEST, naming the
+  // contact with a pointer id that GetPointerType classifies as PT_TOUCHPAD; only then does the
+  // window hand the contact to its viewport with SetContact. Windows stops promoting a contact
+  // that a viewport took over, so the same gesture never arrives twice as wheel messages.
+  //
+  // Gesture output arrives as viewport transforms (translation for pan, scale for pinch) after
+  // each application driven update, which is why the window ticks the update manager once per
+  // frame and reports inertia as momentum scrolling.
+  class DirectManipulation;
+  class DirectManipulationHandler;
+
+  // Native touchpad pan is reported in pixels of the gestured window, while Visage consumers
+  // expect normalized scroll deltas. This keeps trackpad pan and zoom speed consistent with the
+  // precise scrolling deltas the macOS backend derives from the same class of native input.
+  static constexpr float kTrackpadScrollScale = 0.008f;
+
+  // DirectManipulationManager class, the master Direct Manipulation class id (Direct Manipulation
+  // GUIDs: 54E211B6-3650-4F75-8334-FA359598E1C5). It is written out here instead of using the SDK
+  // symbol so this translation unit needs no import library beyond what the target already links.
+  static const CLSID kDirectManipulationManagerClassId = {
+    0x54e211b6, 0x3650, 0x4f75, { 0x83, 0x34, 0xfa, 0x35, 0x95, 0x98, 0xe1, 0xc5 }
+  };
+
+  class DirectManipulation {
+  public:
+    DirectManipulation() = default;
+
+    static std::shared_ptr<DirectManipulation> create(WindowWin32* window, HWND hwnd) {
+      std::shared_ptr<DirectManipulation> manipulation = std::make_shared<DirectManipulation>();
+      if (!manipulation->initialize(window, hwnd))
+        return nullptr;
+
+      return manipulation;
+    }
+
+    ~DirectManipulation() { shutdown(); }
+
+    // Detaches this gesture state from its window and releases every Direct Manipulation object.
+    // The window owns the lifetime, so the teardown is driven from the window instead of waiting
+    // for the last shared reference to drop.
+    void shutdown();
+
+    void setWindowActive(bool active);
+    void onPointerHitTest(WPARAM w_param);
+    void applyPendingUpdates();
+
+    void viewportStatusChanged(DIRECTMANIPULATION_STATUS current, DIRECTMANIPULATION_STATUS previous);
+    void contentUpdated(IDirectManipulationContent* content);
+
+  private:
+    enum class Gesture { None, Scroll, Fling, Pinch };
+
+    bool initialize(WindowWin32* window, HWND hwnd);
+    void updateViewportSize();
+    void resetViewportTransform();
+    void captureGesturePosition(UINT32 pointer_id);
+    void resetGesture();
+
+    WindowWin32* window_ = nullptr;
+    HWND hwnd_ = nullptr;
+    IDirectManipulationManager* manager_ = nullptr;
+    IDirectManipulationUpdateManager* update_manager_ = nullptr;
+    IDirectManipulationViewport* viewport_ = nullptr;
+    DirectManipulationHandler* handler_ = nullptr;
+    DWORD handler_cookie_ = 0;
+    int viewport_width_ = 0;
+    int viewport_height_ = 0;
+    float gesture_x_ = 0.0f;
+    float gesture_y_ = 0.0f;
+    float last_scale_ = 1.0f;
+    float last_x_offset_ = 0.0f;
+    float last_y_offset_ = 0.0f;
+    Gesture gesture_ = Gesture::None;
+    bool handler_registered_ = false;
+    bool activated_ = false;
+    bool poll_updates_ = false;
+    bool updating_ = false;
+    bool resetting_transform_ = false;
+    bool released_ = false;
+  };
+
+  // Windows reports gesture phase transitions and transforms through this viewport event handler.
+  // Its callbacks run on the thread that created the viewport, which is the window's UI thread.
+  class DirectManipulationHandler : public IDirectManipulationViewportEventHandler {
+  public:
+    explicit DirectManipulationHandler(DirectManipulation* owner) : owner_(owner) { }
+
+    // Windows releases the handler asynchronously in some teardown orders; dropping the owner
+    // keeps late callbacks harmless.
+    void detachOwner() { owner_ = nullptr; }
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override {
+      if (object == nullptr)
+        return E_POINTER;
+
+      if (riid == IID_IUnknown || riid == __uuidof(IDirectManipulationViewportEventHandler)) {
+        *object = static_cast<IDirectManipulationViewportEventHandler*>(this);
+        AddRef();
+        return S_OK;
+      }
+
+      *object = nullptr;
+      return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override {
+      return static_cast<ULONG>(InterlockedIncrement(&ref_count_));
+    }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+      const ULONG remaining = static_cast<ULONG>(InterlockedDecrement(&ref_count_));
+      if (remaining == 0)
+        delete this;
+
+      return remaining;
+    }
+
+    HRESULT STDMETHODCALLTYPE OnViewportStatusChanged(IDirectManipulationViewport*,
+                                                      DIRECTMANIPULATION_STATUS current,
+                                                      DIRECTMANIPULATION_STATUS previous) override {
+      if (owner_)
+        owner_->viewportStatusChanged(current, previous);
+      return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE OnViewportUpdated(IDirectManipulationViewport*) override {
+      return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE OnContentUpdated(IDirectManipulationViewport*,
+                                               IDirectManipulationContent* content) override {
+      if (owner_)
+        owner_->contentUpdated(content);
+      return S_OK;
+    }
+
+  private:
+    ~DirectManipulationHandler() = default;
+
+    DirectManipulation* owner_ = nullptr;
+    volatile LONG ref_count_ = 1;
+  };
+
+  bool DirectManipulation::initialize(WindowWin32* window, HWND hwnd) {
+    window_ = window;
+    hwnd_ = hwnd;
+    released_ = false;
+
+    // Every Direct Manipulation call can pump messages that destroy the window this gesture state
+    // belongs to, so each step is rechecked before the next one runs.
+    HRESULT result = CoCreateInstance(kDirectManipulationManagerClassId, nullptr,
+                                      CLSCTX_INPROC_SERVER,
+                                      IID_PPV_ARGS(&manager_));
+    if (!released_ && SUCCEEDED(result))
+      result = manager_->GetUpdateManager(IID_PPV_ARGS(&update_manager_));
+    if (!released_ && SUCCEEDED(result))
+      result = manager_->CreateViewport(nullptr, hwnd_, IID_PPV_ARGS(&viewport_));
+
+    // Railed translation with inertia plus scaling is a touchpad pan/zoom viewport. No content is
+    // ever attached to it: it exists only to report gesture transforms to the application, which
+    // needs the manual update mode to tick them once per frame.
+    const DIRECTMANIPULATION_CONFIGURATION configuration =
+        DIRECTMANIPULATION_CONFIGURATION_INTERACTION | DIRECTMANIPULATION_CONFIGURATION_TRANSLATION_X |
+        DIRECTMANIPULATION_CONFIGURATION_TRANSLATION_Y | DIRECTMANIPULATION_CONFIGURATION_TRANSLATION_INERTIA |
+        DIRECTMANIPULATION_CONFIGURATION_RAILS_X | DIRECTMANIPULATION_CONFIGURATION_RAILS_Y |
+        DIRECTMANIPULATION_CONFIGURATION_SCALING;
+    if (!released_ && SUCCEEDED(result))
+      result = viewport_->ActivateConfiguration(configuration);
+    if (!released_ && SUCCEEDED(result))
+      result = viewport_->SetViewportOptions(DIRECTMANIPULATION_VIEWPORT_OPTIONS_MANUALUPDATE);
+
+    if (!released_ && SUCCEEDED(result)) {
+      handler_ = new DirectManipulationHandler(this);
+      result = viewport_->AddEventHandler(hwnd_, handler_, &handler_cookie_);
+      handler_registered_ = SUCCEEDED(result);
+    }
+
+    if (!released_ && SUCCEEDED(result))
+      updateViewportSize();
+    if (!released_ && SUCCEEDED(result))
+      result = manager_->Activate(hwnd_);
+    if (!released_ && SUCCEEDED(result)) {
+      activated_ = true;
+      result = viewport_->Enable();
+    }
+    if (!released_ && SUCCEEDED(result))
+      result = update_manager_->Update(nullptr);
+
+    if (FAILED(result) || released_) {
+      shutdown();
+      return false;
+    }
+
+    return true;
+  }
+
+  void DirectManipulation::shutdown() {
+    if (released_)
+      return;
+
+    // Every callback from here on has to be a no-op: the window may already be gone while a
+    // Direct Manipulation call it started is still unwinding.
+    released_ = true;
+    window_ = nullptr;
+    poll_updates_ = false;
+    resetGesture();
+
+    if (viewport_) {
+      viewport_->Stop();
+      if (handler_registered_)
+        viewport_->RemoveEventHandler(handler_cookie_);
+
+      // Abandon releases the viewport's resources; no viewport call is valid afterwards.
+      viewport_->Abandon();
+      viewport_->Release();
+      viewport_ = nullptr;
+    }
+
+    handler_registered_ = false;
+    handler_cookie_ = 0;
+
+    if (handler_) {
+      handler_->detachOwner();
+      handler_->Release();
+      handler_ = nullptr;
+    }
+
+    if (manager_) {
+      if (activated_)
+        manager_->Deactivate(hwnd_);
+
+      manager_->Release();
+      manager_ = nullptr;
+    }
+    activated_ = false;
+
+    if (update_manager_) {
+      update_manager_->Release();
+      update_manager_ = nullptr;
+    }
+  }
+
+  void DirectManipulation::setWindowActive(bool active) {
+    if (released_ || manager_ == nullptr || active == activated_)
+      return;
+
+    if (viewport_) {
+      viewport_->Stop();
+
+      // Leaving the window resets the viewport transform together with the gesture baseline, so a
+      // gesture after the window comes back is measured from identity instead of a stale offset.
+      if (!active)
+        resetViewportTransform();
+    }
+
+    if (released_ || window_ == nullptr)
+      return;
+
+    poll_updates_ = false;
+    resetGesture();
+
+    if (active) {
+      const HRESULT result = manager_->Activate(hwnd_);
+      if (!released_ && SUCCEEDED(result))
+        activated_ = true;
+      return;
+    }
+
+    manager_->Deactivate(hwnd_);
+    if (!released_)
+      activated_ = false;
+  }
+
+  void DirectManipulation::onPointerHitTest(WPARAM w_param) {
+    if (released_ || viewport_ == nullptr || window_ == nullptr)
+      return;
+
+    const UINT32 pointer_id = GET_POINTERID_WPARAM(w_param);
+    POINTER_INPUT_TYPE pointer_type = PT_POINTER;
+    if (!GetPointerType(pointer_id, &pointer_type) || pointer_type != PT_TOUCHPAD)
+      return;
+
+    // The viewport rect is refreshed before the contact is handed over so that resizing the
+    // viewport can never stop a gesture that was just captured.
+    updateViewportSize();
+    if (released_ || viewport_ == nullptr || window_ == nullptr)
+      return;
+
+    captureGesturePosition(pointer_id);
+    if (FAILED(viewport_->SetContact(pointer_id)))
+      return;
+
+    // SetContact can pump messages that destroy the window, so the window is rechecked before it
+    // is used again.
+    if (released_ || window_ == nullptr)
+      return;
+
+    poll_updates_ = true;
+  }
+
+  void DirectManipulation::applyPendingUpdates() {
+    // Only an active gesture needs a frame tick: the viewport rect is refreshed when a contact is
+    // captured and at startup, so an idle window does no work here.
+    if (released_ || window_ == nullptr || !poll_updates_ || update_manager_ == nullptr || updating_)
+      return;
+
+    // In manual update mode Windows only produces gesture transforms when the application ticks
+    // the update manager, which also drives inertia. The tick can pump messages, so a nested tick
+    // is ignored until it returns.
+    updating_ = true;
+    update_manager_->Update(nullptr);
+    updating_ = false;
+  }
+
+  void DirectManipulation::viewportStatusChanged(DIRECTMANIPULATION_STATUS current,
+                                                 DIRECTMANIPULATION_STATUS previous) {
+    if (released_ || window_ == nullptr || current == previous)
+      return;
+
+    // The tail of a two finger pan is inertia; Visage reports it as the same scrolling gesture
+    // with momentum set.
+    if (current == DIRECTMANIPULATION_INERTIA) {
+      if (previous == DIRECTMANIPULATION_RUNNING && gesture_ == Gesture::Scroll)
+        gesture_ = Gesture::Fling;
+      return;
+    }
+
+    if (current == DIRECTMANIPULATION_RUNNING) {
+      if (previous == DIRECTMANIPULATION_INERTIA)
+        gesture_ = Gesture::None;
+      return;
+    }
+
+    if (current != DIRECTMANIPULATION_READY)
+      return;
+
+    // A finished manipulation reports READY while its transform is still applied, which has to be
+    // reset to identity before the next gesture can be measured. The reset also clears the gesture
+    // baseline. Windows reports one more READY without a transform afterwards, and that is where
+    // the gesture sequence really ends.
+    if (last_scale_ != 1.0f || last_x_offset_ != 0.0f || last_y_offset_ != 0.0f) {
+      resetViewportTransform();
+      return;
+    }
+
+    resetGesture();
+    poll_updates_ = false;
+  }
+
+  void DirectManipulation::contentUpdated(IDirectManipulationContent* content) {
+    if (released_ || window_ == nullptr || content == nullptr || resetting_transform_)
+      return;
+
+    float transform[6] = {};
+    if (FAILED(content->GetContentTransform(transform, 6)))
+      return;
+
+    // A Direct Manipulation call can pump messages that destroy the window, so it is rechecked
+    // before the gesture is reported.
+    if (released_ || window_ == nullptr)
+      return;
+
+    // Windows reports a zero scale for a viewport that is not producing a gesture.
+    const float scale = transform[0];
+    if (scale == 0.0f)
+      return;
+
+    // Transforms are in physical pixels of the gestured window; mouse events are converted to
+    // logical coordinates, so the gesture delta is too.
+    const float dpi_scale = window_->nativeDpiScale();
+    const float x_offset = transform[4] / dpi_scale;
+    const float y_offset = transform[5] / dpi_scale;
+
+    constexpr float kScaleEpsilon = 1.0e-5f;
+    constexpr float kOffsetEpsilon = 0.01f;
+    if (std::abs(scale - last_scale_) < kScaleEpsilon &&
+        std::abs(x_offset - last_x_offset_) < kOffsetEpsilon &&
+        std::abs(y_offset - last_y_offset_) < kOffsetEpsilon)
+      return;
+
+    if (std::abs(scale - 1.0f) < kScaleEpsilon) {
+      if (gesture_ == Gesture::None)
+        gesture_ = Gesture::Scroll;
+    }
+    else {
+      // A pinch often starts with a little translation; once Direct Manipulation reports a scale,
+      // only the scale is applied so the viewed content does not drift while zooming.
+      gesture_ = Gesture::Pinch;
+    }
+
+    const float previous_scale = last_scale_ > 0.0f ? last_scale_ : 1.0f;
+    const float delta_x = (x_offset - last_x_offset_) * kTrackpadScrollScale;
+    const float delta_y = (y_offset - last_y_offset_) * kTrackpadScrollScale;
+    const float magnification = scale / previous_scale - 1.0f;
+    const bool momentum = gesture_ == Gesture::Fling;
+    const Gesture gesture = gesture_;
+
+    last_scale_ = scale;
+    last_x_offset_ = x_offset;
+    last_y_offset_ = y_offset;
+
+    const int x = static_cast<int>(std::lround(gesture_x_));
+    const int y = static_cast<int>(std::lround(gesture_y_));
+    if (gesture == Gesture::Pinch) {
+      if (magnification != 0.0f)
+        window_->handleMouseMagnify(magnification, x, y, mouseButtonState(), keyboardModifiers());
+      return;
+    }
+
+    if (delta_x == 0.0f && delta_y == 0.0f)
+      return;
+
+    window_->handleMouseWheel(delta_x, delta_y, delta_x, delta_y, x, y, mouseButtonState(),
+                              keyboardModifiers(), momentum, true);
+  }
+
+  void DirectManipulation::updateViewportSize() {
+    if (released_ || viewport_ == nullptr || hwnd_ == nullptr)
+      return;
+
+    RECT client = {};
+    if (!GetClientRect(hwnd_, &client))
+      return;
+
+    const int width = client.right - client.left;
+    const int height = client.bottom - client.top;
+    if (width <= 0 || height <= 0 || (width == viewport_width_ && height == viewport_height_))
+      return;
+
+    // The viewport rect anchors gesture transforms and may only change while the viewport rests.
+    // Stop can pump messages, so the viewport is rechecked before it is used again.
+    viewport_->Stop();
+    if (released_ || viewport_ == nullptr)
+      return;
+
+    RECT rect = { 0, 0, width, height };
+    if (FAILED(viewport_->SetViewportRect(&rect)))
+      return;
+
+    viewport_width_ = width;
+    viewport_height_ = height;
+  }
+
+  void DirectManipulation::resetViewportTransform() {
+    if (viewport_ == nullptr || viewport_width_ <= 0 || viewport_height_ <= 0) {
+      resetGesture();
+      return;
+    }
+
+    // The gesture baseline is cleared before the viewport is reset, so an identity transform that
+    // Windows reports on a later update contributes no delta. Updates that the reset triggers
+    // synchronously describe the reset itself and are ignored: reporting them would apply the
+    // inverse of the gesture that just ended.
+    resetGesture();
+    resetting_transform_ = true;
+    viewport_->ZoomToRect(0.0f, 0.0f, static_cast<float>(viewport_width_),
+                          static_cast<float>(viewport_height_), FALSE);
+    resetting_transform_ = false;
+  }
+
+  void DirectManipulation::captureGesturePosition(UINT32 pointer_id) {
+    if (window_ == nullptr)
+      return;
+
+    POINT position = {};
+    POINTER_INFO info = {};
+    if (GetPointerInfo(pointer_id, &info)) {
+      position = info.ptPixelLocation;
+    }
+    else if (!GetCursorPos(&position)) {
+      const IPoint last_position = window_->lastWindowMousePosition();
+      gesture_x_ = last_position.x * 1.0f;
+      gesture_y_ = last_position.y * 1.0f;
+      return;
+    }
+
+    // The touchpad contact is hit tested against the window at the pointer position, which is the
+    // gesture location in client pixels that mouse events use.
+    ScreenToClient(hwnd_, &position);
+    gesture_x_ = position.x * 1.0f;
+    gesture_y_ = position.y * 1.0f;
+  }
+
+  void DirectManipulation::resetGesture() {
+    gesture_ = Gesture::None;
+    last_scale_ = 1.0f;
+    last_x_offset_ = 0.0f;
+    last_y_offset_ = 0.0f;
+  }
+
   static LRESULT WINAPI windowProcedure(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param) {
     WindowWin32* window = reinterpret_cast<WindowWin32*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
     if (window == nullptr)
@@ -1076,6 +1586,16 @@ namespace visage {
     }
     switch (msg) {
     case WM_VBLANK: {
+      // The shared_ptr keeps the gesture state alive while a Direct Manipulation call can pump
+      // messages that destroy this window.
+      if (std::shared_ptr<DirectManipulation> manipulation = direct_manipulation_) {
+        manipulation->applyPendingUpdates();
+
+        // A gesture callback may have removed this window; nothing here may touch it afterwards.
+        if (NativeWindowLookup::instance().findByNativeHandle(hwnd) != this)
+          return 0;
+      }
+
       if (!refreshNativeDpi())
         return 0;
       drawCallback(v_blank_thread_->vBlankTime());
@@ -1251,7 +1771,16 @@ namespace visage {
       ScreenToClient(hwnd, &position);
       float delta_x = msg == WM_MOUSEHWHEEL ? delta : 0.0f;
       float delta_y = msg == WM_MOUSEWHEEL ? delta : 0.0f;
-      handleMouseWheel(delta_x, delta_y, position.x, position.y, mouseButtonState(), keyboardModifiers());
+      // Discrete wheels keep their own path: only scrolling the OS promoted from a touch digitizer
+      // is reported as trackpad input, and Windows does not promote a touchpad contact that Direct
+      // Manipulation took over, so neither source is delivered twice.
+      handleMouseWheel(delta_x, delta_y, position.x, position.y, mouseButtonState(), keyboardModifiers(),
+                       false, isTouchpadScrollMessage());
+      return 0;
+    }
+    case DM_POINTERHITTEST: {
+      if (std::shared_ptr<DirectManipulation> manipulation = direct_manipulation_)
+        manipulation->onPointerHitTest(w_param);
       return 0;
     }
     case WM_KILLFOCUS: {
@@ -1267,6 +1796,16 @@ namespace visage {
       return TRUE;
     }
     case WM_SIZE: {
+      // A minimized window cannot host a gesture; Direct Manipulation is deactivated there and
+      // reactivated when the window is shown again.
+      if (std::shared_ptr<DirectManipulation> manipulation = direct_manipulation_) {
+        const bool minimized = w_param == SIZE_MINIMIZED || w_param == SIZE_MAXHIDE;
+        manipulation->setWindowActive(!minimized);
+
+        if (NativeWindowLookup::instance().findByNativeHandle(hwnd) != this)
+          return TRUE;
+      }
+
       handleResizeEnd();
       return TRUE;
     }
@@ -1605,10 +2144,33 @@ namespace visage {
     if (drag_drop_target_)
       RegisterDragDrop(window_handle_, drag_drop_target_);
 
+    // Touchpad pan/zoom requires this window to be a Direct Manipulation consumer; a window that
+    // cannot create the manager (or runs on a system without it) simply keeps the promoted mouse
+    // wheel behavior for touchpad scrolling.
+    const HWND native = window_handle_;
+    if (native) {
+      std::shared_ptr<DirectManipulation> manipulation = DirectManipulation::create(this, native);
+
+      // Creating the gesture state can pump messages that remove this window, in which case the
+      // state is dropped instead of being attached to a window that is going away.
+      if (NativeWindowLookup::instance().findByNativeHandle(native) != this)
+        return;
+
+      direct_manipulation_ = std::move(manipulation);
+    }
+
     updateMonitor();
   }
 
   WindowWin32::~WindowWin32() {
+    // Stop gesture callbacks before the window handle and its message routing disappear. The
+    // reference is detached first so a Direct Manipulation call that pumps messages cannot reach
+    // this window through a partially destroyed instance.
+    if (std::shared_ptr<DirectManipulation> manipulation = direct_manipulation_) {
+      direct_manipulation_ = nullptr;
+      manipulation->shutdown();
+    }
+
     if (drag_drop_target_) {
       RevokeDragDrop(window_handle_);
       drag_drop_target_->Release();
@@ -1648,8 +2210,15 @@ namespace visage {
   }
 
   void WindowWin32::show(int show_flag) {
-    ShowWindow(window_handle_, show_flag);
-    SetFocus(window_handle_);
+    const HWND native = window_handle_;
+    ShowWindow(native, show_flag);
+    SetFocus(native);
+
+    if (std::shared_ptr<DirectManipulation> manipulation = direct_manipulation_) {
+      manipulation->setWindowActive(true);
+      if (NativeWindowLookup::instance().findByNativeHandle(native) != this)
+        return;
+    }
 
     if (v_blank_thread_ == nullptr) {
       v_blank_thread_ = std::make_unique<VBlankThread>(this);
@@ -1664,7 +2233,14 @@ namespace visage {
   }
 
   void WindowWin32::hide() {
-    ShowWindow(window_handle_, SW_HIDE);
+    const HWND native = window_handle_;
+    if (std::shared_ptr<DirectManipulation> manipulation = direct_manipulation_) {
+      manipulation->setWindowActive(false);
+      if (NativeWindowLookup::instance().findByNativeHandle(native) != this)
+        return;
+    }
+
+    ShowWindow(native, SW_HIDE);
     handleWindowHidden();
   }
 

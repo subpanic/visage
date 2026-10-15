@@ -52,8 +52,10 @@ namespace visage {
       mouse_hovered_frame_ = nullptr;
     if (temporary_frame_ == frame)
       temporary_frame_ = nullptr;
-    if (mouse_down_frame_ == frame)
+    if (mouse_down_frame_ == frame) {
       mouse_down_frame_ = nullptr;
+      mouse_down_captured_ = false;
+    }
     if (keyboard_focused_frame_ == frame)
       keyboard_focused_frame_ = nullptr;
     if (drag_drop_target_frame_ == frame)
@@ -61,11 +63,13 @@ namespace visage {
   }
 
   void WindowEventHandler::handleFocusLost() {
+    space_down_ = false;
     if (keyboard_focused_frame_)
       keyboard_focused_frame_->processFocusChanged(false, false);
     if (mouse_down_frame_) {
       mouse_down_frame_->processMouseUp(mouseEvent(last_mouse_position_.x, last_mouse_position_.y, 0, 0));
       mouse_down_frame_ = nullptr;
+      mouse_down_captured_ = false;
     }
     if (mouse_hovered_frame_) {
       mouse_hovered_frame_->processMouseExit(mouseEvent(last_mouse_position_.x,
@@ -115,6 +119,9 @@ namespace visage {
   }
 
   bool WindowEventHandler::handleKeyDown(const KeyEvent& e) {
+    if (e.key_code == KeyCode::Space)
+      space_down_ = true;
+
     if (keyboard_focused_frame_ == nullptr)
       return false;
 
@@ -138,6 +145,9 @@ namespace visage {
   }
 
   bool WindowEventHandler::handleKeyUp(const KeyEvent& e) {
+    if (e.key_code == KeyCode::Space)
+      space_down_ = false;
+
     if (keyboard_focused_frame_ == nullptr)
       return false;
 
@@ -235,6 +245,7 @@ namespace visage {
 
     mouse_event.button_state = button_state;
     mouse_event.modifiers = modifiers;
+    mouse_event.space_down = space_down_;
 
     return mouse_event;
   }
@@ -298,7 +309,21 @@ namespace visage {
     MouseEvent mouse_event = buttonMouseEvent(button_id, x, y, button_state, modifiers);
     mouse_event.repeat_click_count = repeat;
 
-    mouse_down_frame_ = content_frame_->frameAtPoint(mouse_event.window_position);
+    Frame* pressed_frame = content_frame_->frameAtPoint(mouse_event.window_position);
+    mouse_down_frame_ = pressed_frame;
+    // Let ancestors capture navigation before child widgets see the press. The original target
+    // is exposed during this walk; focus and subsequent drag events belong to the capturer.
+    MouseEvent capture_event = mouse_event;
+    capture_event.event_frame = pressed_frame;
+    for (Frame* candidate = pressed_frame; candidate; candidate = candidate->parent()) {
+      capture_event.position = mouse_event.window_position - candidate->positionInWindow();
+      if (candidate->capturesMouseDown(capture_event)) {
+        mouse_down_frame_ = candidate;
+        break;
+      }
+    }
+    mouse_down_captured_ = mouse_down_frame_ != nullptr && mouse_down_frame_ != pressed_frame;
+
     temporary_frame_ = mouse_down_frame_;
     while (temporary_frame_ && !temporary_frame_->acceptsKeystrokes())
       temporary_frame_ = temporary_frame_->parent();
@@ -323,8 +348,12 @@ namespace visage {
     MouseEvent mouse_event = buttonMouseEvent(button_id, x, y, button_state, modifiers);
     mouse_event.repeat_click_count = repeat;
 
+    Frame* previous_hover = mouse_hovered_frame_;
     mouse_hovered_frame_ = content_frame_->frameAtPoint(mouse_event.window_position);
-    bool exited = mouse_hovered_frame_ != mouse_down_frame_;
+    // A captured press belongs to the intercepting ancestor for its whole gesture, so enter/exit
+    // follows real hover changes; otherwise it tracks whether the release left the press frame.
+    bool exited = mouse_down_captured_ ? mouse_hovered_frame_ != previous_hover :
+                                         mouse_hovered_frame_ != mouse_down_frame_;
 
     if (mouse_down_frame_) {
       mouse_event.position = mouse_event.window_position - mouse_down_frame_->positionInWindow();
@@ -332,9 +361,10 @@ namespace visage {
       auto frame = mouse_down_frame_;
       mouse_down_frame_ = nullptr;
       frame->processMouseUp(mouse_event);
-      if (exited && frame)
+      if (exited && frame && !mouse_down_captured_)
         frame->processMouseExit(mouse_event);
     }
+    mouse_down_captured_ = false;
 
     mouse_event.event_frame = mouse_hovered_frame_;
     if (exited && mouse_hovered_frame_)
@@ -358,13 +388,14 @@ namespace visage {
 
   void WindowEventHandler::handleMouseWheel(float delta_x, float delta_y, float precise_x,
                                             float precise_y, int x, int y, int button_state,
-                                            int modifiers, bool momentum) {
+                                            int modifiers, bool momentum, bool is_trackpad) {
     MouseEvent mouse_event = mouseEvent(x, y, button_state, modifiers);
     mouse_event.wheel_delta_x = delta_x;
     mouse_event.wheel_delta_y = delta_y;
     mouse_event.precise_wheel_delta_x = precise_x;
     mouse_event.precise_wheel_delta_y = precise_y;
     mouse_event.wheel_momentum = momentum;
+    mouse_event.wheel_is_trackpad = is_trackpad;
 
     mouse_hovered_frame_ = content_frame_->frameAtPoint(mouse_event.window_position);
     if (mouse_hovered_frame_) {
@@ -378,6 +409,32 @@ namespace visage {
         if (temporary_frame_) {
           mouse_event.position = mouse_event.window_position - temporary_frame_->positionInWindow();
           used = temporary_frame_->processMouseWheel(mouse_event);
+          if (temporary_frame_)
+            temporary_frame_ = temporary_frame_->parent();
+        }
+      }
+    }
+    temporary_frame_ = nullptr;
+  }
+
+  void WindowEventHandler::handleMouseMagnify(float magnification, int x, int y, int button_state,
+                                              int modifiers) {
+    MouseEvent mouse_event = mouseEvent(x, y, button_state, modifiers);
+    mouse_event.pinch_scale = 1.0f + magnification;
+
+    mouse_hovered_frame_ = content_frame_->frameAtPoint(mouse_event.window_position);
+    if (mouse_hovered_frame_) {
+      temporary_frame_ = mouse_hovered_frame_;
+      bool used = false;
+
+      // Dispatched separately from the wheel loop so scroll widgets never consume pinch gestures.
+      while (!used && temporary_frame_) {
+        while (temporary_frame_ && temporary_frame_->ignoresMouseEvents())
+          temporary_frame_ = temporary_frame_->parent();
+
+        if (temporary_frame_) {
+          mouse_event.position = mouse_event.window_position - temporary_frame_->positionInWindow();
+          used = temporary_frame_->processMouseMagnify(mouse_event);
           if (temporary_frame_)
             temporary_frame_ = temporary_frame_->parent();
         }

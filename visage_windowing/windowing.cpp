@@ -225,15 +225,23 @@ namespace visage {
   }
 
   void Window::handleMouseWheel(float delta_x, float delta_y, float precise_x, float precise_y,
-                                int x, int y, int button_state, int modifiers, bool momentum) {
+                                int x, int y, int button_state, int modifiers, bool momentum,
+                                bool is_trackpad) {
     if (event_handler_)
       event_handler_->handleMouseWheel(delta_x, delta_y, precise_x, precise_y, x, y, button_state,
-                                       modifiers, momentum);
+                                       modifiers, momentum, is_trackpad);
   }
 
   void Window::handleMouseWheel(float delta_x, float delta_y, int x, int y, int button_state,
-                                int modifiers, bool momentum) {
-    handleMouseWheel(delta_x, delta_y, delta_x, delta_y, x, y, button_state, modifiers, momentum);
+                                int modifiers, bool momentum, bool is_trackpad) {
+    handleMouseWheel(delta_x, delta_y, delta_x, delta_y, x, y, button_state, modifiers, momentum,
+                     is_trackpad);
+  }
+
+  void Window::handleMouseMagnify(float magnification, int x, int y, int button_state,
+                                  int modifiers) {
+    if (event_handler_)
+      event_handler_->handleMouseMagnify(magnification, x, y, button_state, modifiers);
   }
 
   bool Window::isDragDropSource() const {

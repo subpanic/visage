@@ -57,7 +57,10 @@ namespace visage {
     void handleMouseEnter(int x, int y) override;
     void handleMouseLeave(int x, int y, int button_state, int modifiers) override;
     void handleMouseWheel(float delta_x, float delta_y, float precise_x, float precise_y, int x,
-                          int y, int button_state, int modifiers, bool momentum) override;
+                          int y, int button_state, int modifiers, bool momentum,
+                          bool is_trackpad) override;
+    void handleMouseMagnify(float magnification, int x, int y, int button_state,
+                            int modifiers) override;
 
     bool handleKeyDown(const KeyEvent& e);
     bool handleKeyUp(const KeyEvent& e);
@@ -100,6 +103,8 @@ namespace visage {
 
     Point last_mouse_position_ = { 0, 0 };
     HitTestResult current_hit_test_ = HitTestResult::Client;
+    bool space_down_ = false;
+    bool mouse_down_captured_ = false;
 
     VISAGE_LEAK_CHECKER(WindowEventHandler)
   };

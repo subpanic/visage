@@ -74,6 +74,7 @@ namespace visage {
     auto& onMouseMove() { return on_mouse_move_; }
     auto& onMouseDrag() { return on_mouse_drag_; }
     auto& onMouseWheel() { return on_mouse_wheel_; }
+    auto& onMouseMagnify() { return on_mouse_magnify_; }
     auto& onKeyPress() { return on_key_press_; }
     auto& onKeyRelease() { return on_key_release_; }
     auto& onTextInput() { return on_text_input_; }
@@ -95,6 +96,9 @@ namespace visage {
     virtual void mouseMove(const MouseEvent& e) { }
     virtual void mouseDrag(const MouseEvent& e) { }
     virtual bool mouseWheel(const MouseEvent& e) { return false; }
+    // Pinch/zoom gesture, dispatched separately from wheel scrolling so scrolling widgets that
+    // return true from mouseWheel never consume pinch magnification.
+    virtual bool mouseMagnify(const MouseEvent& e) { return false; }
     virtual bool keyPress(const KeyEvent& e) { return false; }
     virtual bool keyRelease(const KeyEvent& e) { return false; }
 
@@ -102,6 +106,11 @@ namespace visage {
     virtual void textInput(const std::string& text) { }
 
     virtual HitTestResult hitTest(const Point& position) const { return HitTestResult::Client; }
+
+    // When true, this frame is chosen as the mouse-down target for presses that land on it or on
+    // any of its descendants, letting it intercept navigation before child widgets dispatch.
+    // e.event_frame is the originally hit frame; e.position is relative to this frame.
+    virtual bool capturesMouseDown(const MouseEvent& e) const { return false; }
 
     virtual bool receivesDragDropFiles() { return false; }
     virtual std::string dragDropFileExtensionRegex() { return ".*"; }
@@ -374,6 +383,7 @@ namespace visage {
     void processMouseMove(const MouseEvent& e) { propagateMouseEvent(e, &Frame::onMouseMove); }
     void processMouseDrag(const MouseEvent& e) { propagateMouseEvent(e, &Frame::onMouseDrag); }
     bool processMouseWheel(const MouseEvent& e) { return on_mouse_wheel_.callback(e); }
+    bool processMouseMagnify(const MouseEvent& e) { return on_mouse_magnify_.callback(e); }
     void processFocusChanged(bool is_focused, bool was_clicked) {
       keyboard_focus_ = is_focused && accepts_keystrokes_;
       focusChanged(is_focused, was_clicked);
@@ -446,6 +456,7 @@ namespace visage {
     CallbackList<void(const MouseEvent&)> on_mouse_move_ { [this](auto& e) { mouseMove(e); } };
     CallbackList<void(const MouseEvent&)> on_mouse_drag_ { [this](auto& e) { mouseDrag(e); } };
     CallbackList<bool(const MouseEvent&)> on_mouse_wheel_ { [this](auto& e) { return mouseWheel(e); } };
+    CallbackList<bool(const MouseEvent&)> on_mouse_magnify_ { [this](auto& e) { return mouseMagnify(e); } };
     CallbackList<bool(const KeyEvent&)> on_key_press_ { [this](auto& e) { return keyPress(e); } };
     CallbackList<bool(const KeyEvent&)> on_key_release_ { [this](auto& e) { return keyRelease(e); } };
     CallbackList<void(const std::string&)> on_text_input_ { [this](auto& text) { textInput(text); } };

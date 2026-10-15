@@ -61,6 +61,15 @@ namespace visage {
         window.second->close();
     }
 
+    // Device changes are reported per window and carry no window identity, and each window on the
+    // connection keeps its own cached device state, so every window of this connection is reset.
+    void clearInputDeviceStates(X11Connection* x11) const {
+      for (auto& window : native_window_lookup_) {
+        if (window.second->x11Connection() == x11)
+          window.second->clearInputDeviceStates();
+      }
+    }
+
     WindowX11* findWindow(::Window handle) {
       auto it = native_window_lookup_.find((void*)handle);
       return it != native_window_lookup_.end() ? it->second : nullptr;
@@ -505,6 +514,26 @@ namespace visage {
     XUnlockDisplay(display);
   }
 
+  void X11Connection::initializeXInput2() {
+    int opcode = 0;
+    int event_base = 0;
+    int error_base = 0;
+    if (!XQueryExtension(display_, "XInputExtension", &opcode, &event_base, &error_base))
+      return;
+
+    // A client has to announce the XI version it supports; the server answers with the newest
+    // version it supports up to the requested one. XI 2.4 is the newest version used here, and
+    // the request is not limited to what the build headers know so a newer server still reports
+    // gesture support.
+    int major = XI_2_Major;
+    int minor = kGestureMinorVersion;
+    if (XIQueryVersion(display_, &major, &minor) != Success || major < XI_2_Major)
+      return;
+
+    xinput2_available_ = true;
+    xinput2_minor_version_ = minor;
+  }
+
   int displayFps() {
     WindowX11* window = WindowX11::lastActiveWindow();
     if (window)
@@ -542,6 +571,341 @@ namespace visage {
                     x11_->dndVersion(), 1);
   }
 
+  static bool xinput2IsDeviceChangeEvent(int evtype) {
+    return evtype == XI_DeviceChanged || evtype == XI_HierarchyChanged;
+  }
+
+  // Window an XInput2 event was delivered to, or None for events that are not bound to a window
+  // (device and hierarchy changes).
+  static ::Window xinput2EventWindow(const XGenericEventCookie* cookie) {
+    if (cookie->evtype == XI_ButtonPress || cookie->evtype == XI_ButtonRelease ||
+        cookie->evtype == XI_Motion)
+      return ((const XIDeviceEvent*)cookie->data)->event;
+
+    if (cookie->evtype == XI_GesturePinchBegin || cookie->evtype == XI_GesturePinchUpdate ||
+        cookie->evtype == XI_GesturePinchEnd)
+      return ((const XIGesturePinchEvent*)cookie->data)->event;
+
+    return None;
+  }
+
+  void WindowX11::selectXInputEvents() {
+    if (!x11_->xinput2Available())
+      return;
+
+    // Eight bytes cover every XInput2 event type; bits for events the server does not support
+    // stay zero, which the server ignores.
+    unsigned char pointer_bits[8] {};
+    XIEventMask pointer_mask {};
+    pointer_mask.deviceid = XIAllMasterDevices;
+    pointer_mask.mask_len = (int)sizeof(pointer_bits);
+    pointer_mask.mask = pointer_bits;
+
+    // Selecting master devices keeps pointer delivery identical to core pointer delivery: a slave
+    // device sends its own XI2 events in addition to the master's, and only the master pass is
+    // requested here.
+    XISetMask(pointer_bits, XI_ButtonPress);
+    XISetMask(pointer_bits, XI_ButtonRelease);
+    XISetMask(pointer_bits, XI_Motion);
+
+    // Device and hierarchy changes describe devices instead of a pointer position, and the server
+    // only accepts the hierarchy mask for the "all devices" pseudo device. Pinch gestures are
+    // selected for all devices as well: the server resolves gesture ownership against the device
+    // that generated the gesture, which is the slave (touchpad) device.
+    unsigned char device_bits[8] {};
+    XIEventMask device_mask {};
+    device_mask.deviceid = XIAllDevices;
+    device_mask.mask_len = (int)sizeof(device_bits);
+    device_mask.mask = device_bits;
+
+    XISetMask(device_bits, XI_DeviceChanged);
+    XISetMask(device_bits, XI_HierarchyChanged);
+    if (x11_->xinput2GesturesAvailable()) {
+      // The server requires all three pinch events to be selected together.
+      XISetMask(device_bits, XI_GesturePinchBegin);
+      XISetMask(device_bits, XI_GesturePinchUpdate);
+      XISetMask(device_bits, XI_GesturePinchEnd);
+    }
+
+    XIEventMask event_masks[] = { pointer_mask, device_mask };
+    XISelectEvents(x11_->display(), window_handle_, event_masks, 2);
+  }
+
+  // Device state is loaded once per device and window from the device's native XInput2 classes.
+  // Trackpads are recognized from device metadata only: dependent (non-direct touch) devices,
+  // devices offering XI 2.4 gestures, and devices carrying read-only settings that only exist for
+  // touchpad-class devices (libinput tapping, disable-while-typing and click methods, or the
+  // synaptics capability set). Direct touch devices and plain pointing devices stay non-trackpad,
+  // so wheel scrolling keeps its discrete handling.
+  WindowX11::InputDeviceState& WindowX11::inputDeviceState(int device_id) {
+    InputDeviceState& state = input_devices_[device_id];
+    if (state.queried)
+      return state;
+
+    state.queried = true;
+
+    int num_devices = 0;
+    X11Connection::DisplayLock lock(x11_);
+    XIDeviceInfo* devices = XIQueryDevice(x11_->display(), device_id, &num_devices);
+    if (devices == nullptr || num_devices < 1)
+      return state;
+
+    loadInputDeviceState(devices[0], state);
+    XIFreeDeviceInfo(devices);
+    return state;
+  }
+
+  void WindowX11::loadInputDeviceState(const XIDeviceInfo& device, InputDeviceState& state) {
+    state.scroll_valuators.clear();
+    state.smooth_scroll_active = false;
+    state.trackpad = false;
+    state.queried = true;
+
+    for (int i = 0; i < device.num_classes; ++i) {
+      XIAnyClassInfo* class_info = device.classes[i];
+      if (class_info == nullptr)
+        continue;
+
+      if (class_info->type == XIScrollClass) {
+        XIScrollClassInfo* scroll = (XIScrollClassInfo*)class_info;
+        ScrollValuator valuator;
+        valuator.axis = scroll->number;
+        valuator.vertical = scroll->scroll_type == XIScrollTypeVertical;
+        // Increments are used as reported, they may legitimately be negative and then also carry
+        // the scroll direction of the axis.
+        valuator.increment = scroll->increment != 0.0 ? scroll->increment : 1.0;
+        state.scroll_valuators.push_back(valuator);
+      }
+      else if (class_info->type == XITouchClass) {
+        XITouchClassInfo* touch = (XITouchClassInfo*)class_info;
+        if (touch->mode == XIDependentTouch)
+          state.trackpad = true;
+      }
+      else if (class_info->type == XIGestureClass)
+        state.trackpad = true;
+    }
+
+    // The valuator classes report the device's current axis position, which is the baseline a
+    // smooth scroll delta is measured against. Seeding it here, before the events carrying the
+    // deltas arrive, keeps the first scroll from being measured against an absent baseline.
+    for (int i = 0; i < device.num_classes; ++i) {
+      XIAnyClassInfo* class_info = device.classes[i];
+      if (class_info == nullptr || class_info->type != XIValuatorClass)
+        continue;
+
+      XIValuatorClassInfo* valuator_info = (XIValuatorClassInfo*)class_info;
+      for (ScrollValuator& valuator : state.scroll_valuators) {
+        if (valuator.axis != valuator_info->number)
+          continue;
+
+        valuator.last_value = valuator_info->value;
+        valuator.has_last_value = true;
+      }
+    }
+
+    if (state.trackpad)
+      return;
+
+    int num_properties = 0;
+    Atom* properties = XIListProperties(x11_->display(), device.deviceid, &num_properties);
+    if (properties == nullptr)
+      return;
+
+    for (int i = 0; i < num_properties; ++i) {
+      if (x11_->isTouchpadProperty(properties[i])) {
+        state.trackpad = true;
+        break;
+      }
+    }
+    XFree(properties);
+  }
+
+  // Device classes and axis positions change while the pointer is outside the window, so all
+  // cached device state is reloaded on pointer entry: the baselines are refreshed to where the
+  // device is now, which avoids reporting scrolling that happened over another window while
+  // keeping scrolling in this window lossless.
+  void WindowX11::reloadInputDeviceStates() {
+    if (!x11_->xinput2Available())
+      return;
+
+    input_devices_.clear();
+
+    int num_devices = 0;
+    X11Connection::DisplayLock lock(x11_);
+    XIDeviceInfo* devices = XIQueryDevice(x11_->display(), XIAllDevices, &num_devices);
+    if (devices == nullptr)
+      return;
+
+    for (int i = 0; i < num_devices; ++i)
+      loadInputDeviceState(devices[i], input_devices_[devices[i].deviceid]);
+    XIFreeDeviceInfo(devices);
+  }
+
+  void WindowX11::pointerScrollForEvent(const XIDeviceEvent* device_event, InputDeviceState& state,
+                                        float& delta_x, float& delta_y) {
+    delta_x = 0.0f;
+    delta_y = 0.0f;
+
+    if (state.scroll_valuators.empty())
+      return;
+
+    double horizontal = 0.0;
+    double vertical = 0.0;
+    int value_index = 0;
+    int axis_count = device_event->valuators.mask_len * 8;
+    for (int axis = 0; axis < axis_count; ++axis) {
+      if (!XIMaskIsSet(device_event->valuators.mask, axis))
+        continue;
+
+      // Valuator values of set axes are packed in axis order.
+      double value = device_event->valuators.values[value_index++];
+      for (ScrollValuator& valuator : state.scroll_valuators) {
+        if (valuator.axis != axis)
+          continue;
+
+        // Values are the device's accumulated axis position, so scrolling is the difference to
+        // the previous event, scaled by the axis increment that equals one legacy scroll button.
+        if (valuator.has_last_value) {
+          double delta = (value - valuator.last_value) / valuator.increment;
+          if (valuator.vertical)
+            vertical += delta;
+          else
+            horizontal += delta;
+        }
+        valuator.last_value = value;
+        valuator.has_last_value = true;
+      }
+    }
+
+    // Valuators report positive values for scrolling down and right, the wheel handler follows
+    // the legacy button convention where scrolling up is positive.
+    delta_x = horizontal;
+    delta_y = -vertical;
+    if (delta_x != 0.0f || delta_y != 0.0f)
+      state.smooth_scroll_active = true;
+  }
+
+  void WindowX11::processXInput2Motion(XIDeviceEvent* device_event) {
+    PointerEvent pointer { (int)device_event->event_x, (int)device_event->event_y,
+                           (int)device_event->root_x, (int)device_event->root_y, 0,
+                           device_event->time };
+
+    InputDeviceState& state = inputDeviceState(device_event->sourceid);
+    float delta_x = 0.0f;
+    float delta_y = 0.0f;
+    pointerScrollForEvent(device_event, state, delta_x, delta_y);
+    if (delta_x != 0.0f || delta_y != 0.0f) {
+      handleMouseWheel(delta_x, delta_y, pointer.x, pointer.y, mouseButtonState(), modifierState(),
+                       false, state.trackpad);
+    }
+
+    // Scroll events carry the unchanged pointer position, so they must not be reported as
+    // pointer movement.
+    bool pointer_moved = XIMaskIsSet(device_event->valuators.mask, 0) ||
+                         XIMaskIsSet(device_event->valuators.mask, 1);
+    if (pointer_moved)
+      processPointerMotion(pointer);
+  }
+
+  void WindowX11::processXInput2Button(XIDeviceEvent* device_event, bool press) {
+    PointerEvent pointer { (int)device_event->event_x, (int)device_event->event_y,
+                           (int)device_event->root_x, (int)device_event->root_y,
+                           device_event->detail, device_event->time };
+
+    if (pointer.button >= 4 && pointer.button <= 7) {
+      // Only the press carries the scroll, the matching release is not forwarded either.
+      if (!press)
+        return;
+
+      InputDeviceState& state = inputDeviceState(device_event->sourceid);
+
+      // Servers emulate the legacy scroll buttons from a device's smooth scroll valuators. Once
+      // smooth deltas are being delivered those emulated events repeat the same scrolling, so
+      // they are dropped. A device whose deltas could not be measured yet keeps them, which
+      // preserves its first step instead of losing it.
+      if ((device_event->flags & XIPointerEmulated) && state.smooth_scroll_active)
+        return;
+
+      float y = (pointer.button == 4 ? 1.0f : 0.0f) - (pointer.button == 5 ? 1.0f : 0.0f);
+      float x = (pointer.button == 7 ? 1.0f : 0.0f) - (pointer.button == 6 ? 1.0f : 0.0f);
+      handleMouseWheel(x, y, pointer.x, pointer.y, mouseButtonState(), modifierState(), false,
+                       state.trackpad);
+      return;
+    }
+
+    if (press)
+      processPointerButtonPress(pointer);
+    else
+      processPointerButtonRelease(pointer);
+  }
+
+  void WindowX11::processXInput2Pinch(XIGesturePinchEvent* pinch_event) {
+    InputDeviceState& state = inputDeviceState(pinch_event->sourceid);
+    bool cancelled = (pinch_event->flags & XIGesturePinchEventCancelled) != 0;
+
+    if (pinch_event->evtype == XI_GesturePinchEnd || cancelled) {
+      state.pinch_scale = 1.0;
+      return;
+    }
+
+    // An invalid scale would poison the per update ratio below, so it is dropped.
+    if (pinch_event->scale <= 0.0)
+      return;
+
+    if (pinch_event->evtype == XI_GesturePinchBegin) {
+      state.pinch_scale = pinch_event->scale;
+      return;
+    }
+
+    // The protocol reports the scale relative to the start of the gesture, while the windowing
+    // API takes the magnification of this update only.
+    double previous_scale = state.pinch_scale > 0.0 ? state.pinch_scale : 1.0;
+    state.pinch_scale = pinch_event->scale;
+
+    float magnification = (float)(pinch_event->scale / previous_scale - 1.0);
+    if (magnification != 0.0f)
+      handleMouseMagnify(magnification, (int)pinch_event->event_x, (int)pinch_event->event_y,
+                         mouseButtonState(), modifierState());
+  }
+
+  void WindowX11::processXInput2Event(XEvent& event) {
+    XGenericEventCookie* cookie = &event.xcookie;
+    switch (cookie->evtype) {
+    case XI_ButtonPress: processXInput2Button((XIDeviceEvent*)cookie->data, true); break;
+    case XI_ButtonRelease: processXInput2Button((XIDeviceEvent*)cookie->data, false); break;
+    case XI_Motion: processXInput2Motion((XIDeviceEvent*)cookie->data); break;
+    case XI_GesturePinchBegin:
+    case XI_GesturePinchUpdate:
+    case XI_GesturePinchEnd: processXInput2Pinch((XIGesturePinchEvent*)cookie->data); break;
+    default: break;
+    }
+  }
+
+  // Generic (extension) events carry their payload in a cookie that has to be claimed with
+  // XGetEventData and released with XFreeEventData. The window the event was delivered to is part
+  // of that payload, which is why these events are routed before the core event window lookup.
+  void WindowX11::processXInput2GenericEvent(XEvent& event) {
+    Display* display = x11_->display();
+    XGenericEventCookie* cookie = &event.xcookie;
+    if (!XGetEventData(display, cookie))
+      return;
+
+    if (xinput2IsDeviceChangeEvent(cookie->evtype)) {
+      // Device classes can change and a master device switches to the valuators of another slave,
+      // so cached scroll valuators and their last values are no longer valid.
+      NativeWindowLookup::instance().clearInputDeviceStates(x11_);
+    }
+    else {
+      ::Window event_window = xinput2EventWindow(cookie);
+      WindowX11* window = event_window ? NativeWindowLookup::instance().findWindow(event_window) :
+                                         nullptr;
+      if (window)
+        window->processXInput2Event(event);
+    }
+
+    XFreeEventData(display, cookie);
+  }
+
   WindowX11* WindowX11::last_active_window_ = nullptr;
 
   WindowX11::WindowX11(int x, int y, int width, int height, Decoration decoration) :
@@ -572,6 +936,8 @@ namespace visage {
     XFree(size_hints);
 
     XSelectInput(display, window_handle_, kEventMask);
+    selectXInputEvents();
+    reloadInputDeviceStates();
     start_draw_microseconds_ = time::microseconds();
     setDpiScale(monitor_info_.dpi / kDefaultDpi);
     XFlush(display);
@@ -633,6 +999,8 @@ namespace visage {
     XReparentWindow(display, window_handle_, parent_handle_, 0, 0);
 
     XSelectInput(display, window_handle_, kEventMask);
+    selectXInputEvents();
+    reloadInputDeviceStates();
     XFlush(display);
 
     parent_configure_recreate_pending_ = true;
@@ -743,6 +1111,42 @@ namespace visage {
     XFlush(display);
   }
 
+  // Buttons this window does not use are handed to the embedding parent as core events, the same
+  // way core button events are forwarded.
+  void WindowX11::passButtonToParent(bool press, const PointerEvent& pointer) {
+    int button_state = mouseButtonState();
+    int modifiers = modifierState();
+
+    XEvent event = {};
+    event.xbutton.type = press ? ButtonPress : ButtonRelease;
+    event.xbutton.display = x11_->display();
+    event.xbutton.root = x11_->rootWindow();
+    event.xbutton.subwindow = None;
+    event.xbutton.time = pointer.time;
+    event.xbutton.x = pointer.x;
+    event.xbutton.y = pointer.y;
+    event.xbutton.x_root = pointer.root_x;
+    event.xbutton.y_root = pointer.root_y;
+    event.xbutton.same_screen = True;
+    event.xbutton.button = pointer.button;
+    if (button_state & kMouseButtonLeft)
+      event.xbutton.state |= Button1Mask;
+    if (button_state & kMouseButtonMiddle)
+      event.xbutton.state |= Button2Mask;
+    if (button_state & kMouseButtonRight)
+      event.xbutton.state |= Button3Mask;
+    if (modifiers & kModifierShift)
+      event.xbutton.state |= ShiftMask;
+    if (modifiers & kModifierRegCtrl)
+      event.xbutton.state |= ControlMask;
+    if (modifiers & kModifierAlt)
+      event.xbutton.state |= Mod1Mask;
+    if (modifiers & kModifierMeta)
+      event.xbutton.state |= Mod4Mask;
+
+    passEventToParent(event);
+  }
+
   int WindowX11::mouseButtonState() const {
     X11Connection::DisplayLock lock(x11_);
 
@@ -783,12 +1187,13 @@ namespace visage {
     return result;
   }
 
-  static MouseButton buttonFromEvent(XEvent& event) {
-    if (event.xbutton.button == Button1)
+  // XInput2 reports the button number in the event, core events use the same numbering.
+  static MouseButton buttonFrom(int button) {
+    if (button == Button1)
       return kMouseButtonLeft;
-    if (event.xbutton.button == Button2)
+    if (button == Button2)
       return kMouseButtonMiddle;
-    if (event.xbutton.button == Button3)
+    if (button == Button3)
       return kMouseButtonRight;
     return kMouseButtonNone;
   }
@@ -1091,6 +1496,11 @@ namespace visage {
     while (XPending(x11_->display())) {
       XNextEvent(x11_->display(), &event);
 
+      if (event.type == GenericEvent) {
+        processXInput2GenericEvent(event);
+        continue;
+      }
+
       if (event.xany.window == parent_handle_ && event.type == ConfigureNotify) {
         X11Connection::DisplayLock lock(x11_);
         XWindowAttributes attributes;
@@ -1150,6 +1560,164 @@ namespace visage {
         XSendEvent(request->display, result.requestor, 0, NoEventMask, (XEvent*)&result);
       break;
     }
+    }
+  }
+
+  // Core pointer delivery and XInput2 delivery both funnel through these handlers so the two
+  // event sources cannot drift apart. They are mutually exclusive for a given event: the server
+  // delivers a device event as XInput2 when a client selected that event on the window and as a
+  // core event otherwise.
+  void WindowX11::processPointerMotion(const PointerEvent& pointer) {
+    X11Connection::DisplayLock lock(x11_);
+    last_active_window_ = this;
+
+    if (window_operation_ & kMoveWindow) {
+      int x_offset = pointer.root_x - dragging_window_position_.x;
+      int y_offset = pointer.root_y - dragging_window_position_.y;
+      XMoveWindow(x11_->display(), window_handle_, x_offset, y_offset);
+    }
+    else if (window_operation_) {
+      ::Window root;
+      int window_x, window_y;
+      unsigned int window_width, window_height, border, depth;
+      XGetGeometry(x11_->display(), window_handle_, &root, &window_x, &window_y, &window_width,
+                   &window_height, &border, &depth);
+      int window_right = window_x + window_width;
+      int window_bottom = window_y + window_height;
+
+      if (window_operation_ & kResizeLeft)
+        window_x = std::min(window_right - kMinWidth, pointer.root_x);
+      else if (window_operation_ & kResizeRight)
+        window_right = std::max(window_x + kMinHeight, pointer.root_x);
+      if (window_operation_ & kResizeTop)
+        window_y = std::min(window_bottom - kMinHeight, pointer.root_y);
+      else if (window_operation_ & kResizeBottom)
+        window_bottom = std::max(window_y + kMinHeight, pointer.root_y);
+
+      XMoveResizeWindow(x11_->display(), window_handle_, window_x, window_y, window_right - window_x,
+                        window_bottom - window_y);
+    }
+
+    int last_hover_operation = hover_window_operation_;
+    hover_window_operation_ = resizeOperationForPosition(pointer.x, pointer.y);
+    if (hover_window_operation_)
+      setCursorStyle(windowResizeCursor(hover_window_operation_));
+    else if (last_hover_operation)
+      setCursorStyle(MouseCursor::Arrow);
+
+    if (drag_drop_out_state_.dragging) {
+      ::Window last_target = drag_drop_out_state_.target;
+      if (pointer.x >= 0 && pointer.x < clientWidth() && pointer.y >= 0 &&
+          pointer.y < clientHeight()) {
+        drag_drop_out_state_.target = 0;
+        handleFileDrag(pointer.x, pointer.y, drag_drop_files_);
+      }
+      else {
+        if (drag_drop_out_state_.target == 0)
+          handleFileDragLeave();
+
+        drag_drop_out_state_.target = windowUnderCursor();
+      }
+      if (last_target != drag_drop_out_state_.target) {
+        if (last_target)
+          sendDragDropLeave(window_handle_, last_target);
+        if (drag_drop_out_state_.target)
+          sendDragDropEnter(window_handle_, drag_drop_out_state_.target);
+      }
+      if (drag_drop_out_state_.target)
+        sendDragDropPosition(window_handle_, drag_drop_out_state_.target, pointer.root_x,
+                             pointer.root_y, pointer.time);
+      return;
+    }
+    if (mouseRelativeMode() && mouse_down_position_ == IPoint(pointer.x, pointer.y))
+      return;
+
+    if (window_operation_ == 0) {
+      handleMouseMove(pointer.x, pointer.y, mouseButtonState(), modifierState());
+      if (mouseRelativeMode())
+        setNativeCursorPosition(mouse_down_position_);
+    }
+  }
+
+  void WindowX11::processPointerButtonPress(const PointerEvent& pointer) {
+    MouseButton button = buttonFrom(pointer.button);
+    if (button == kMouseButtonNone)
+      passButtonToParent(true, pointer);
+    else
+      handleMouseDown(button, pointer.x, pointer.y, mouseButtonState(), modifierState());
+
+    HitTestResult hit_test = handleHitTest(pointer.x, pointer.y);
+
+    window_operation_ = resizeOperationForPosition(pointer.x, pointer.y);
+    if (hit_test == HitTestResult::TitleBar && window_operation_ == 0) {
+      window_operation_ = kMoveWindow;
+      ::Window root;
+      int window_x, window_y;
+      unsigned int window_width, window_height, border, depth;
+      XGetGeometry(x11_->display(), window_handle_, &root, &window_x, &window_y, &window_width,
+                   &window_height, &border, &depth);
+      dragging_window_position_ = { pointer.root_x - window_x, pointer.root_y - window_y };
+    }
+
+    mouse_down_position_ = { pointer.x, pointer.y };
+
+    drag_drop_out_state_.dragging = isDragDropSource();
+    if (drag_drop_out_state_.dragging) {
+      XSetSelectionOwner(x11_->display(), x11_->dndSelection(), window_handle_, pointer.time);
+
+      setCursorStyle(MouseCursor::MultiDirectionalResize);
+      drag_drop_files_.clear();
+      drag_drop_files_.push_back(startDragDropSource());
+    }
+  }
+
+  void WindowX11::processPointerButtonRelease(const PointerEvent& pointer) {
+    window_operation_ = 0;
+    MouseButton button = buttonFrom(pointer.button);
+    HitTestResult hit_test = currentHitTest();
+    if (drag_drop_out_state_.dragging && button == kMouseButtonLeft) {
+      if (pointer.x >= 0 && pointer.x < clientWidth() && pointer.y >= 0 &&
+          pointer.y < clientHeight()) {
+        if (drag_drop_out_state_.target)
+          sendDragDropLeave(window_handle_, drag_drop_out_state_.target);
+        handleFileDrop(pointer.x, pointer.y, drag_drop_files_);
+      }
+      else if (drag_drop_out_state_.target)
+        sendDragDropDrop(window_handle_, drag_drop_out_state_.target);
+
+      cleanupDragDropSource();
+      drag_drop_out_state_.dragging = false;
+      setCursorStyle(MouseCursor::Arrow);
+    }
+    if (button == kMouseButtonNone)
+      passButtonToParent(false, pointer);
+    else
+      handleMouseUp(button, pointer.x, pointer.y, mouseButtonState(), modifierState());
+
+    if (button == kMouseButtonLeft) {
+      if (hit_test == HitTestResult::CloseButton &&
+          handleHitTest(pointer.x, pointer.y) == HitTestResult::CloseButton) {
+        close();
+      }
+      else if (hit_test == HitTestResult::MaximizeButton &&
+               handleHitTest(pointer.x, pointer.y) == HitTestResult::MaximizeButton) {
+        showMaximized();
+      }
+      else if (hit_test == HitTestResult::MinimizeButton &&
+               handleHitTest(pointer.x, pointer.y) == HitTestResult::MinimizeButton) {
+        Atom wm_change_state = XInternAtom(x11_->display(), "WM_CHANGE_STATE", False);
+        XEvent min_event = {};
+        min_event.xclient.type = ClientMessage;
+        min_event.xclient.message_type = wm_change_state;
+        min_event.xclient.display = x11_->display();
+        min_event.xclient.window = window_handle_;
+        min_event.xclient.format = 32;
+        min_event.xclient.data.l[0] = IconicState;
+
+        XSendEvent(x11_->display(), x11_->rootWindow(), False,
+                   SubstructureRedirectMask | SubstructureNotifyMask, &min_event);
+        XFlush(x11_->display());
+      }
     }
   }
 
@@ -1301,168 +1869,31 @@ namespace visage {
       break;
     }
     case MotionNotify: {
-      X11Connection::DisplayLock lock(x11_);
-      last_active_window_ = this;
-
-      if (window_operation_ & kMoveWindow) {
-        int x_offset = event.xmotion.x_root - dragging_window_position_.x;
-        int y_offset = event.xmotion.y_root - dragging_window_position_.y;
-        XMoveWindow(x11_->display(), window_handle_, x_offset, y_offset);
-      }
-      else if (window_operation_) {
-        ::Window root;
-        int window_x, window_y;
-        unsigned int window_width, window_height, border, depth;
-        XGetGeometry(x11_->display(), window_handle_, &root, &window_x, &window_y, &window_width,
-                     &window_height, &border, &depth);
-        int window_right = window_x + window_width;
-        int window_bottom = window_y + window_height;
-
-        if (window_operation_ & kResizeLeft)
-          window_x = std::min(window_right - kMinWidth, event.xmotion.x_root);
-        else if (window_operation_ & kResizeRight)
-          window_right = std::max(window_x + kMinHeight, event.xmotion.x_root);
-        if (window_operation_ & kResizeTop)
-          window_y = std::min(window_bottom - kMinHeight, event.xmotion.y_root);
-        else if (window_operation_ & kResizeBottom)
-          window_bottom = std::max(window_y + kMinHeight, event.xmotion.y_root);
-
-        XMoveResizeWindow(x11_->display(), window_handle_, window_x, window_y,
-                          window_right - window_x, window_bottom - window_y);
-      }
-
-      int last_hover_operation = hover_window_operation_;
-      hover_window_operation_ = resizeOperationForPosition(event.xmotion.x, event.xmotion.y);
-      if (hover_window_operation_)
-        setCursorStyle(windowResizeCursor(hover_window_operation_));
-      else if (last_hover_operation)
-        setCursorStyle(MouseCursor::Arrow);
-
-      if (drag_drop_out_state_.dragging) {
-        ::Window last_target = drag_drop_out_state_.target;
-        if (event.xmotion.x >= 0 && event.xmotion.x < clientWidth() && event.xmotion.y >= 0 &&
-            event.xmotion.y < clientHeight()) {
-          drag_drop_out_state_.target = 0;
-          handleFileDrag(event.xmotion.x, event.xmotion.y, drag_drop_files_);
-        }
-        else {
-          if (drag_drop_out_state_.target == 0)
-            handleFileDragLeave();
-
-          drag_drop_out_state_.target = windowUnderCursor();
-        }
-        if (last_target != drag_drop_out_state_.target) {
-          if (last_target)
-            sendDragDropLeave(window_handle_, last_target);
-          if (drag_drop_out_state_.target)
-            sendDragDropEnter(window_handle_, drag_drop_out_state_.target);
-        }
-        if (drag_drop_out_state_.target)
-          sendDragDropPosition(window_handle_, drag_drop_out_state_.target, event.xmotion.x_root,
-                               event.xmotion.y_root, event.xmotion.time);
-        break;
-      }
-      if (mouseRelativeMode() && mouse_down_position_ == IPoint(event.xmotion.x, event.xmotion.y))
-        break;
-
-      if (window_operation_ == 0) {
-        handleMouseMove(event.xmotion.x, event.xmotion.y, mouseButtonState(), modifierState());
-        if (mouseRelativeMode())
-          setNativeCursorPosition(mouse_down_position_);
-      }
+      processPointerMotion({ event.xmotion.x, event.xmotion.y, event.xmotion.x_root,
+                             event.xmotion.y_root, 0, event.xmotion.time });
       break;
     }
     case ButtonPress: {
-      if (event.xbutton.button >= 4 && event.xbutton.button <= 7) {
-        float y = (event.xbutton.button == 4 ? 1.0f : 0.0f) - (event.xbutton.button == 5 ? 1.0f : 0.0f);
-        float x = (event.xbutton.button == 7 ? 1.0f : 0.0f) - (event.xbutton.button == 6 ? 1.0f : 0.0f);
-        handleMouseWheel(x, y, event.xbutton.x, event.xbutton.y, mouseButtonState(), modifierState());
+      PointerEvent pointer { event.xbutton.x, event.xbutton.y, event.xbutton.x_root,
+                             event.xbutton.y_root, event.xbutton.button, event.xbutton.time };
+      if (pointer.button >= 4 && pointer.button <= 7) {
+        float y = (pointer.button == 4 ? 1.0f : 0.0f) - (pointer.button == 5 ? 1.0f : 0.0f);
+        float x = (pointer.button == 7 ? 1.0f : 0.0f) - (pointer.button == 6 ? 1.0f : 0.0f);
+        handleMouseWheel(x, y, pointer.x, pointer.y, mouseButtonState(), modifierState());
       }
-      else {
-        MouseButton button = buttonFromEvent(event);
-        if (button == kMouseButtonNone)
-          passEventToParent(event);
-        else
-          handleMouseDown(button, event.xbutton.x, event.xbutton.y, mouseButtonState(), modifierState());
-
-        HitTestResult hit_test = handleHitTest(event.xbutton.x, event.xbutton.y);
-
-        window_operation_ = resizeOperationForPosition(event.xbutton.x, event.xbutton.y);
-        if (hit_test == HitTestResult::TitleBar && window_operation_ == 0) {
-          window_operation_ = kMoveWindow;
-          ::Window root;
-          int window_x, window_y;
-          unsigned int window_width, window_height, border, depth;
-          XGetGeometry(x11_->display(), window_handle_, &root, &window_x, &window_y, &window_width,
-                       &window_height, &border, &depth);
-          dragging_window_position_ = { event.xbutton.x_root - window_x, event.xbutton.y_root - window_y };
-        }
-
-        mouse_down_position_ = { event.xbutton.x, event.xbutton.y };
-
-        drag_drop_out_state_.dragging = isDragDropSource();
-        if (drag_drop_out_state_.dragging) {
-          XSetSelectionOwner(x11_->display(), x11_->dndSelection(), window_handle_, event.xmotion.time);
-
-          setCursorStyle(MouseCursor::MultiDirectionalResize);
-          drag_drop_files_.clear();
-          drag_drop_files_.push_back(startDragDropSource());
-        }
-      }
+      else
+        processPointerButtonPress(pointer);
       break;
     }
     case ButtonRelease: {
-      window_operation_ = 0;
-      MouseButton button = buttonFromEvent(event);
-      HitTestResult hit_test = currentHitTest();
-      if (drag_drop_out_state_.dragging && button == kMouseButtonLeft) {
-        if (event.xbutton.x >= 0 && event.xbutton.x < clientWidth() && event.xbutton.y >= 0 &&
-            event.xbutton.y < clientHeight()) {
-          if (drag_drop_out_state_.target)
-            sendDragDropLeave(window_handle_, drag_drop_out_state_.target);
-          handleFileDrop(event.xbutton.x, event.xbutton.y, drag_drop_files_);
-        }
-        else if (drag_drop_out_state_.target)
-          sendDragDropDrop(window_handle_, drag_drop_out_state_.target);
-
-        cleanupDragDropSource();
-        drag_drop_out_state_.dragging = false;
-        setCursorStyle(MouseCursor::Arrow);
-      }
-      if (button == kMouseButtonNone)
-        passEventToParent(event);
-      else
-        handleMouseUp(buttonFromEvent(event), event.xbutton.x, event.xbutton.y, mouseButtonState(),
-                      modifierState());
-
-      if (button == kMouseButtonLeft) {
-        if (hit_test == HitTestResult::CloseButton &&
-            handleHitTest(event.xbutton.x, event.xbutton.y) == HitTestResult::CloseButton) {
-          close();
-        }
-        else if (hit_test == HitTestResult::MaximizeButton &&
-                 handleHitTest(event.xbutton.x, event.xbutton.y) == HitTestResult::MaximizeButton) {
-          showMaximized();
-        }
-        else if (hit_test == HitTestResult::MinimizeButton &&
-                 handleHitTest(event.xbutton.x, event.xbutton.y) == HitTestResult::MinimizeButton) {
-          Atom wm_change_state = XInternAtom(x11_->display(), "WM_CHANGE_STATE", False);
-          XEvent min_event = {};
-          min_event.xclient.type = ClientMessage;
-          min_event.xclient.message_type = wm_change_state;
-          min_event.xclient.display = x11_->display();
-          min_event.xclient.window = window_handle_;
-          min_event.xclient.format = 32;
-          min_event.xclient.data.l[0] = IconicState;
-
-          XSendEvent(x11_->display(), x11_->rootWindow(), False,
-                     SubstructureRedirectMask | SubstructureNotifyMask, &min_event);
-          XFlush(x11_->display());
-        }
-      }
+      processPointerButtonRelease({ event.xbutton.x, event.xbutton.y, event.xbutton.x_root,
+                                    event.xbutton.y_root, event.xbutton.button,
+                                    event.xbutton.time });
       break;
     }
     case EnterNotify: {
+      if (event.xcrossing.detail != XINotifyInferior)
+        reloadInputDeviceStates();
       handleMouseEnter(event.xcrossing.x, event.xcrossing.y);
       break;
     }
@@ -1545,6 +1976,12 @@ namespace visage {
 
       while (running && XPending(x11_->display())) {
         XNextEvent(x11_->display(), &event);
+        if (event.type == GenericEvent) {
+          // The window an extension event was delivered to is part of the event payload.
+          processXInput2GenericEvent(event);
+          continue;
+        }
+
         WindowX11* window = NativeWindowLookup::instance().findWindow(event.xany.window);
         if (window == nullptr)
           continue;

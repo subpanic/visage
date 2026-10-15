@@ -62,7 +62,10 @@ namespace visage {
       virtual void handleMouseLeave(int last_x, int last_y, int button_state, int modifiers) = 0;
       virtual void handleMouseWheel(float delta_x, float delta_y, float precise_x, float precise_y,
                                     int mouse_x, int mouse_y, int button_state, int modifiers,
-                                    bool momentum) = 0;
+                                    bool momentum, bool is_trackpad) = 0;
+      // Native magnification delta: zero means no change; the scale multiplier is 1 + delta.
+      virtual void handleMouseMagnify(float magnification, int mouse_x, int mouse_y, int button_state,
+                                      int modifiers) = 0;
 
       virtual bool handleKeyDown(KeyCode key_code, int modifiers, bool repeat) = 0;
       virtual bool handleKeyUp(KeyCode key_code, int modifiers) = 0;
@@ -168,9 +171,11 @@ namespace visage {
     void handleMouseLeave(int button_state, int modifiers);
 
     void handleMouseWheel(float delta_x, float delta_y, float precise_x, float precise_y, int x,
-                          int y, int button_state, int modifiers, bool momentum = false);
+                          int y, int button_state, int modifiers, bool momentum = false,
+                          bool is_trackpad = false);
     void handleMouseWheel(float delta_x, float delta_y, int x, int y, int button_state,
-                          int modifiers, bool momentum = false);
+                          int modifiers, bool momentum = false, bool is_trackpad = false);
+    void handleMouseMagnify(float magnification, int x, int y, int button_state, int modifiers);
 
     void handleFocusLost();
     void handleFocusGained();
