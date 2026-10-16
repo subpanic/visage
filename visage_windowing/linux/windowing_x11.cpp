@@ -1875,7 +1875,8 @@ namespace visage {
     }
     case ButtonPress: {
       PointerEvent pointer { event.xbutton.x, event.xbutton.y, event.xbutton.x_root,
-                             event.xbutton.y_root, event.xbutton.button, event.xbutton.time };
+                             event.xbutton.y_root, static_cast<int>(event.xbutton.button),
+                             event.xbutton.time };
       if (pointer.button >= 4 && pointer.button <= 7) {
         float y = (pointer.button == 4 ? 1.0f : 0.0f) - (pointer.button == 5 ? 1.0f : 0.0f);
         float x = (pointer.button == 7 ? 1.0f : 0.0f) - (pointer.button == 6 ? 1.0f : 0.0f);
@@ -1887,7 +1888,7 @@ namespace visage {
     }
     case ButtonRelease: {
       processPointerButtonRelease({ event.xbutton.x, event.xbutton.y, event.xbutton.x_root,
-                                    event.xbutton.y_root, event.xbutton.button,
+                                    event.xbutton.y_root, static_cast<int>(event.xbutton.button),
                                     event.xbutton.time });
       break;
     }
