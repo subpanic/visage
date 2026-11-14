@@ -220,6 +220,7 @@ namespace visage {
   private:
     PopupMenu menu_;
     Frame* parent_ = nullptr;
+    Frame* source_ = nullptr;
     bool done_ = false;
     Animation<float> opacity_animation_;
     PopupList lists_[kMaxSubMenus];

@@ -423,3 +423,84 @@ TEST_CASE("PopupMenuFrame constants", "[ui]") {
     REQUIRE(PopupMenuFrame::kPauseMs == 400);
   }
 }
+
+TEST_CASE("Popup dismissal restores shortcut focus without stealing new focus", "[ui][popup-focus]") {
+  Frame* focused = nullptr;
+  FrameEventHandler handler;
+  handler.request_keyboard_focus = [&](Frame* frame) {
+    if (focused)
+      focused->processFocusChanged(false, false);
+    focused = frame;
+    if (focused)
+      focused->processFocusChanged(true, false);
+  };
+  handler.remove_from_hierarchy = [&](Frame* frame) {
+    if (focused == frame)
+      focused = nullptr;
+  };
+
+  Frame root;
+  root.setBounds(0, 0, 800, 600);
+  root.setAcceptsKeystrokes(true);
+  root.setEventHandler(&handler);
+  auto source = std::make_unique<Frame>();
+  root.addChild(source.get());
+  Frame dialog;
+  dialog.setAcceptsKeystrokes(true);
+  root.addChild(&dialog);
+
+  int preset_delta = 0;
+  root.onKeyPress() = [&](const KeyEvent& event) {
+    if (event.keyCode() == KeyCode::Up)
+      --preset_delta;
+    else if (event.keyCode() == KeyCode::Down)
+      ++preset_delta;
+    else
+      return false;
+    return true;
+  };
+
+  PopupMenu menu;
+  auto& option = menu.addOption(1, "Preset");
+  bool cancelled = false;
+  menu.onCancel() = [&] { cancelled = true; };
+  auto popup = std::make_unique<PopupMenuFrame>(menu);
+  auto* popup_ptr = popup.get();
+  popup_ptr->show(std::move(popup), source.get(), { 0, 0 });
+  REQUIRE(focused == popup_ptr);
+
+  Frame* expected_focus = &root;
+  SECTION("Selecting a preset keeps arrow shortcuts working after popup destruction") {
+    popup_ptr->optionSelected(option, nullptr);
+  }
+  SECTION("Selection can destroy the source widget") {
+    option.onSelection().add([&](int) { source.reset(); });
+    popup_ptr->optionSelected(option, nullptr);
+  }
+  SECTION("Selection can give a new dialog keyboard focus") {
+    option.onSelection().add([&](int) { dialog.requestKeyboardFocus(); });
+    popup_ptr->optionSelected(option, nullptr);
+    expected_focus = &dialog;
+  }
+  SECTION("Clicking elsewhere keeps its chosen focus") {
+    dialog.requestKeyboardFocus();
+    popup_ptr->exit();
+    expected_focus = &dialog;
+  }
+  SECTION("Cancelling outside the menu restores shortcuts") {
+    popup_ptr->stopTimer();
+    PopupList list;
+    popup_ptr->mouseUpOutside({ -100, -100 }, &list);
+    REQUIRE(cancelled);
+  }
+
+  popup_ptr->timerCallback();
+  REQUIRE(focused == expected_focus);
+  REQUIRE(focused->hasKeyboardFocus());
+  if (expected_focus == &root) {
+    REQUIRE(focused->processKeyPress(KeyEvent(KeyCode::Down, 0, true)));
+    REQUIRE(preset_delta == 1);
+    REQUIRE(focused->processKeyPress(KeyEvent(KeyCode::Up, 0, true)));
+    REQUIRE(preset_delta == 0);
+  }
+}

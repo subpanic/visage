@@ -255,6 +255,7 @@ namespace visage {
   }
 
   void PopupMenuFrame::show(std::unique_ptr<PopupMenuFrame> self, Frame* source, Point point) {
+    source_ = source;
     parent_ = source->topParentFrame();
     parent_->addChild(std::move(self));
 
@@ -306,6 +307,16 @@ namespace visage {
   void PopupMenuFrame::exit() {
     done_ = true;
     startTimer(1);
+
+    // Restore before selection/cancel callbacks, which may open another popup or
+    // remove the source. A click elsewhere already chose its own focus target.
+    if (hasKeyboardFocus()) {
+      Frame* target = source_;
+      while (target && !target->acceptsKeystrokes())
+        target = target->parent();
+      if (target)
+        target->requestKeyboardFocus();
+    }
   }
 
   void PopupMenuFrame::hierarchyChanged() {
@@ -354,14 +365,13 @@ namespace visage {
   }
 
   void PopupMenuFrame::optionSelected(const PopupMenu& option, PopupList* list) {
+    exit();
     if (isVisible()) {
       option.onSelection().callback(option.id());
       menu_.onSelection().callback(option.id());
     }
     else
       menu_.onCancel().callback();
-
-    exit();
   }
 
   void PopupMenuFrame::subMenuSelected(const PopupMenu& option, int selection_y, PopupList* list) {
@@ -423,8 +433,8 @@ namespace visage {
     if (isRunning())
       return;
 
-    menu_.onCancel().callback();
     exit();
+    menu_.onCancel().callback();
   }
 
   void ValueDisplay::showDisplay(const String& text, Bounds bounds, Font::Justification justification) {
