@@ -24,6 +24,7 @@
 
 #include "visage_utils/thread_utils.h"
 
+#include <chrono>
 #include <cstring>
 #include <sstream>
 #include <X11/cursorfont.h>
@@ -788,13 +789,14 @@ namespace visage {
   void WindowX11::processXInput2Motion(XIDeviceEvent* device_event) {
     PointerEvent pointer { (int)device_event->event_x, (int)device_event->event_y,
                            (int)device_event->root_x, (int)device_event->root_y, 0,
-                           device_event->time };
+                           device_event->time, device_event->sourceid };
 
     InputDeviceState& state = inputDeviceState(device_event->sourceid);
     float delta_x = 0.0f;
     float delta_y = 0.0f;
     pointerScrollForEvent(device_event, state, delta_x, delta_y);
     if (delta_x != 0.0f || delta_y != 0.0f) {
+      flushPendingDragMotion();
       handleMouseWheel(delta_x, delta_y, pointer.x, pointer.y, mouseButtonState(), modifierState(),
                        false, state.trackpad);
     }
@@ -890,6 +892,9 @@ namespace visage {
     if (!XGetEventData(display, cookie))
       return;
 
+    if (cookie->evtype != XI_Motion || xinput2EventWindow(cookie) != window_handle_)
+      flushPendingDragMotion();
+
     if (xinput2IsDeviceChangeEvent(cookie->evtype)) {
       // Device classes can change and a master device switches to the valuators of another slave,
       // so cached scroll valuators and their last values are no longer valid.
@@ -944,25 +949,15 @@ namespace visage {
     NativeWindowLookup::instance().addWindow(this);
   }
 
-  static void threadTimerCallback(WindowX11* window) {
-    while (window->timerThreadRunning()) {
-      Thread::sleep(window->timerMs());
-
-      X11Connection* x11 = window->x11Connection();
-      X11Connection::DisplayLock lock(x11);
-      ::Window window_handle = (::Window)window->nativeHandle();
-
-      XEvent event;
-      memset(&event, 0, sizeof(event));
-      event.type = ClientMessage;
-      event.xclient.window = window_handle;
-      event.xclient.message_type = x11->timerEvent();
-      event.xclient.format = 32;
-      event.xclient.data.l[0] = 0;
-
-      XSendEvent(x11->display(), window_handle, False, NoEventMask, &event);
-      XFlush(x11->display());
-    }
+  void WindowX11::wakePluginEventLoop() const {
+    X11Connection::DisplayLock lock(x11_);
+    XEvent event {};
+    event.xclient.type = ClientMessage;
+    event.xclient.window = window_handle_;
+    event.xclient.message_type = x11_->timerEvent();
+    event.xclient.format = 32;
+    XSendEvent(x11_->display(), window_handle_, False, NoEventMask, &event);
+    XFlush(x11_->display());
   }
 
   WindowX11::WindowX11(int width, int height, void* parent_handle) : Window(width, height) {
@@ -1005,9 +1000,16 @@ namespace visage {
 
     parent_configure_recreate_pending_ = true;
 
-    timer_thread_running_ = true;
-    timer_thread_ = std::make_unique<std::thread>(threadTimerCallback, this);
     start_draw_microseconds_ = time::microseconds();
+    timer_thread_running_ = true;
+    timer_thread_ = std::make_unique<std::thread>([this] {
+      while (timer_thread_running_) {
+        Thread::sleep(timer_microseconds_.load() / 1000);
+        // A due frame must not wait behind a burst of motion in Xlib's FIFO.
+        plugin_frame_due_ = true;
+        wakePluginEventLoop();
+      }
+    });
     // Embedded plugin windows are always physical pixels: hosts negotiate plugin sizes in
     // physical pixels and X11 has no per-window DPI, so ignore the monitor-derived scale here.
     setDpiScale(1.0f);
@@ -1491,15 +1493,24 @@ namespace visage {
   }
 
   void WindowX11::processPluginFdEvents() {
-    bool timer_fired = false;
+    using Clock = std::chrono::steady_clock;
+    constexpr auto kInputBudget = std::chrono::milliseconds(4);
+    const auto deadline = Clock::now() + kInputBudget;
+    Display* display = x11_->display();
     XEvent event;
-    while (XPending(x11_->display())) {
-      XNextEvent(x11_->display(), &event);
+    do {
+      if (!XPending(display))
+        break;
+      XNextEvent(display, &event);
+      if (event.type == ClientMessage && event.xclient.message_type == x11_->timerEvent())
+        continue; // Wakeup only; ticks and input continuations use the same host fd.
 
       if (event.type == GenericEvent) {
         processXInput2GenericEvent(event);
         continue;
       }
+      if (event.type != MotionNotify || event.xmotion.window != window_handle_)
+        flushPendingDragMotion();
 
       if (event.xany.window == parent_handle_ && event.type == ConfigureNotify) {
         X11Connection::DisplayLock lock(x11_);
@@ -1514,17 +1525,21 @@ namespace visage {
       else if (event.xany.window == window_handle_ && event.type == MapNotify) {
         notifyWindowMapped();
       }
-      else if (event.xany.window == window_handle_ && event.type == ClientMessage &&
-               event.xclient.message_type == x11_->timerEvent()) {
-        if (!timer_fired) {
-          timer_fired = true;
-          long long microseconds = time::microseconds() - start_draw_microseconds_;
-          drawCallback(microseconds / 1000000.0);
-        }
-      }
       else if (event.xany.window == window_handle_ || event.xany.window == parent_handle_)
         processEvent(event);
+    } while (Clock::now() < deadline);
+
+    flushPendingDragMotion();
+
+    if (plugin_frame_due_.exchange(false)) {
+      const long long elapsed_us = time::microseconds() - start_draw_microseconds_;
+      drawCallback(elapsed_us / 1000000.0);
     }
+
+    // The host polls the socket, not Xlib's queue. If input is already buffered
+    // (including by a synchronous X call during draw), arrange another readable fd.
+    if (XEventsQueued(display, QueuedAlready))
+      wakePluginEventLoop();
   }
 
   void WindowX11::processMessageWindowEvent(XEvent& event) {
@@ -1568,6 +1583,26 @@ namespace visage {
   // delivers a device event as XInput2 when a client selected that event on the window and as a
   // core event otherwise.
   void WindowX11::processPointerMotion(const PointerEvent& pointer) {
+    if (pending_drag_motion_ && pending_drag_motion_->source_id != pointer.source_id)
+      flushPendingDragMotion();
+    if (plugin_x11_ && !mouseRelativeMode() && !window_operation_ &&
+        !drag_drop_out_state_.dragging && canCoalesceMouseDrag()) {
+      pending_drag_motion_ = pointer;
+      return;
+    }
+    flushPendingDragMotion();
+    dispatchPointerMotion(pointer);
+  }
+
+  void WindowX11::flushPendingDragMotion() {
+    if (!pending_drag_motion_)
+      return;
+    const PointerEvent pointer = *pending_drag_motion_;
+    pending_drag_motion_.reset();
+    dispatchPointerMotion(pointer);
+  }
+
+  void WindowX11::dispatchPointerMotion(const PointerEvent& pointer) {
     X11Connection::DisplayLock lock(x11_);
     last_active_window_ = this;
 

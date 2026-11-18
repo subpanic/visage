@@ -27,6 +27,7 @@
 
 #include <atomic>
 #include <map>
+#include <optional>
 #include <thread>
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -347,8 +348,6 @@ namespace visage {
     IPoint maxWindowDimensions() const override;
     MonitorInfo monitorInfo() { return monitor_info_; }
     X11Connection* x11Connection() { return x11_; }
-    bool timerThreadRunning() { return timer_thread_running_.load(); }
-    int timerMs() const { return timer_microseconds_.load() / 1000; }
 
   private:
     static WindowX11* last_active_window_;
@@ -367,6 +366,7 @@ namespace visage {
       int root_y = 0;
       int button = 0;
       unsigned long time = 0;
+      int source_id = 0;
     };
 
     struct ScrollValuator {
@@ -390,6 +390,7 @@ namespace visage {
     ::Window parentHandle() const { return parent_handle_; }
 
     void createWindow(IBounds bounds);
+    void wakePluginEventLoop() const;
     IPoint retrieveWindowDimensions();
     void passEventToParent(XEvent& event);
     int mouseButtonState() const;
@@ -406,6 +407,8 @@ namespace visage {
     void pointerScrollForEvent(const XIDeviceEvent* device_event, InputDeviceState& state,
                                float& delta_x, float& delta_y);
     void processPointerMotion(const PointerEvent& pointer);
+    void flushPendingDragMotion();
+    void dispatchPointerMotion(const PointerEvent& pointer);
     void processPointerButtonPress(const PointerEvent& pointer);
     void processPointerButtonRelease(const PointerEvent& pointer);
     void passButtonToParent(bool press, const PointerEvent& pointer);
@@ -448,6 +451,8 @@ namespace visage {
     long long start_microseconds_ = 0;
     std::atomic<long long> timer_microseconds_ = 16667;
     std::atomic<bool> timer_thread_running_ = false;
+    std::optional<PointerEvent> pending_drag_motion_;
+    std::atomic<bool> plugin_frame_due_ = false;
     std::unique_ptr<std::thread> timer_thread_;
   };
 }

@@ -46,3 +46,12 @@ if (APPLE)
   target_compile_options(VisageWindowing PRIVATE -fobjc-arc)
 endif ()
 
+
+if (VISAGE_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  visage_add_test_target(
+    TARGET VisageX11WindowingTests
+    TEST_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
+  )
+  target_include_directories(VisageX11WindowingTests PRIVATE ${X11_INCLUDES})
+  target_link_libraries(VisageX11WindowingTests PRIVATE ${X11_LIBRARIES})
+endif ()

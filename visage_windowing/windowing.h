@@ -53,6 +53,7 @@ namespace visage {
 
       virtual HitTestResult handleHitTest(int x, int y) = 0;
       virtual HitTestResult currentHitTest() const = 0;
+      virtual bool canCoalesceMouseDrag() const { return false; }
       virtual void handleMouseMove(int x, int y, int button_state, int modifiers) = 0;
       virtual void handleMouseDown(MouseButton button_id, int x, int y, int button_state,
                                    int modifiers, int repeat_clicks) = 0;
@@ -164,6 +165,9 @@ namespace visage {
 
     HitTestResult handleHitTest(int x, int y);
     HitTestResult currentHitTest() const;
+    bool canCoalesceMouseDrag() const {
+      return event_handler_ && event_handler_->canCoalesceMouseDrag();
+    }
     void handleMouseMove(int x, int y, int button_state, int modifiers);
     void handleMouseDown(MouseButton button_id, int x, int y, int button_state, int modifiers);
     void handleMouseUp(MouseButton button_id, int x, int y, int button_state, int modifiers);

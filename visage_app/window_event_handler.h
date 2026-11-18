@@ -49,6 +49,9 @@ namespace visage {
 
     HitTestResult handleHitTest(int x, int y) override;
     HitTestResult currentHitTest() const override { return current_hit_test_; }
+    bool canCoalesceMouseDrag() const override {
+      return mouse_down_frame_ && mouse_down_frame_->canCoalesceMouseDrag();
+    }
     void handleMouseMove(int x, int y, int button_state, int modifiers) override;
     void handleMouseDown(MouseButton button_id, int x, int y, int button_state, int modifiers,
                          int repeat) override;

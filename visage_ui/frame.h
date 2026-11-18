@@ -111,6 +111,8 @@ namespace visage {
     // any of its descendants, letting it intercept navigation before child widgets dispatch.
     // e.event_frame is the originally hit frame; e.position is relative to this frame.
     virtual bool capturesMouseDown(const MouseEvent& e) const { return false; }
+    // True only while intermediate drag positions may be replaced by the newest one.
+    virtual bool canCoalesceMouseDrag() const { return false; }
 
     virtual bool receivesDragDropFiles() { return false; }
     virtual std::string dragDropFileExtensionRegex() { return ".*"; }
